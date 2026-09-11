@@ -1,0 +1,6 @@
+{
+  "name": "CarVision AI",
+  "description": "Autonomous AI vehicle scanner, telematics diagnostics and precision vehicle identification.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
