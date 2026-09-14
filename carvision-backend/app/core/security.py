@@ -1,4 +1,4 @@
-import time
+﻿import time
 import uuid
 from dataclasses import dataclass
 
@@ -15,6 +15,7 @@ class AuthUser:
     id: uuid.UUID
     email: str | None
     metadata: dict
+    app_metadata: dict
     role: str
 
 
@@ -37,6 +38,7 @@ class SupabaseTokenVerifier:
                 issuer=self.issuer,
                 options={"require": ["exp", "sub"]},
             )
-            return AuthUser(uuid.UUID(claims["sub"]), claims.get("email"), claims.get("user_metadata", {}), claims.get("role", "authenticated"))
+            return AuthUser(uuid.UUID(claims["sub"]), claims.get("email"), claims.get("user_metadata", {}), claims.get("app_metadata", {}), claims.get("role", "authenticated"))
         except Exception as exc:
             raise AppError(401, "invalid_token", "Authentication token is invalid or expired") from exc
+

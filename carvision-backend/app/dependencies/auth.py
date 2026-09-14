@@ -1,4 +1,4 @@
-from typing import Annotated
+﻿from typing import Annotated
 
 from fastapi import Depends
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -34,3 +34,13 @@ async def current_profile(
 
 DB = Annotated[AsyncSession, Depends(get_db)]
 Profile = Annotated[UserProfile, Depends(current_profile)]
+async def current_admin(auth: Annotated[AuthUser, Depends(current_auth_user)]) -> AuthUser:
+    """Require an administrator role stored in trusted Supabase app_metadata."""
+    role = auth.app_metadata.get("role")
+    roles = auth.app_metadata.get("roles", [])
+    if role != "admin" and (not isinstance(roles, list) or "admin" not in roles):
+        raise AppError(403, "admin_required", "Administrator access is required")
+    return auth
+
+Admin = Annotated[AuthUser, Depends(current_admin)]
+
