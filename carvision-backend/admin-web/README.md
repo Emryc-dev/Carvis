@@ -42,3 +42,7 @@ npm run build
 ```
 
 The production output is generated in `dist/`.
+
+## Railway deployment
+
+Deploy this directory as a separate Railway service. Follow `RAILWAY_DEPLOYMENT.md`. The production command is `npm start`, which serves the built SPA from `dist/` with client-side routing fallback.
