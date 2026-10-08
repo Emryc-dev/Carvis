@@ -47,7 +47,7 @@ type UserDetail = {
   ai_requests: Array<{ id: string; scan_id: string; provider: string; model: string; status: string; latency_ms?: number | null; error_code?: string | null; created_at: string }>;
 }
 
-type ApiError = Error & { status?: number }
+type ApiError = Error & { status?: number; requestId?: string }
 
 async function apiRequest<T>(path: string, session: Session): Promise<T> {
   const response = await fetch(`${api}${path}`, { headers: { Authorization: `Bearer ${session.access_token}` } })
@@ -55,6 +55,7 @@ async function apiRequest<T>(path: string, session: Session): Promise<T> {
     const body = await response.json().catch(() => null)
     const error = new Error(body?.error?.message || `Request failed (${response.status})`) as ApiError
     error.status = response.status
+    error.requestId = body?.error?.request_id
     throw error
   }
   return response.json() as Promise<T>
@@ -229,7 +230,7 @@ function AdminApp({ session }: { session: Session }) {
 
 function ErrorState({ error, retry }: { error: ApiError; retry: () => void }) {
   const forbidden = error.status === 403
-  return <Card><CardHeader><CardTitle className="flex items-center gap-2"><CircleAlert className="text-destructive"/>{forbidden ? "Administrator access required" : "Unable to load dashboard"}</CardTitle><CardDescription>{forbidden ? "This account is authenticated but does not have app_metadata.role set to admin." : error.message}</CardDescription></CardHeader><CardContent className="flex gap-2"><Button onClick={retry}>Try again</Button>{forbidden && <Button variant="outline" onClick={() => supabase.auth.signOut()}>Use another account</Button>}</CardContent></Card>
+  return <Card><CardHeader><CardTitle className="flex items-center gap-2"><CircleAlert className="text-destructive"/>{forbidden ? "Administrator access required" : "Unable to load dashboard"}</CardTitle><CardDescription>{forbidden ? "This account is authenticated but does not have app_metadata.role set to admin." : error.message}</CardDescription>{error.requestId && <p className="pt-2 font-mono text-xs text-muted-foreground">Request ID: {error.requestId}</p>}</CardHeader><CardContent className="flex gap-2"><Button onClick={retry}>Try again</Button>{forbidden && <Button variant="outline" onClick={() => supabase.auth.signOut()}>Use another account</Button>}</CardContent></Card>
 }
 
 function LoadingState() { return <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">{Array.from({ length: 8 }).map((_, index) => <Skeleton key={index} className="h-36 rounded-xl"/>)}</div> }

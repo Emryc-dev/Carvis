@@ -39,5 +39,12 @@ def install_error_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(Exception)
     async def unexpected(request: Request, exc: Exception) -> ORJSONResponse:
+        import logging
+        logging.getLogger("carvision.api").exception(
+            "Unhandled API error: method=%s path=%s request_id=%s",
+            request.method,
+            request.url.path,
+            getattr(request.state, "request_id", "unknown"),
+        )
         return ORJSONResponse(status_code=500, content=payload("internal_error", "An unexpected error occurred", request.state.request_id), headers=cors_headers(request))
 
