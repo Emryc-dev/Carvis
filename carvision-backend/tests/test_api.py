@@ -20,3 +20,9 @@ def test_admin_endpoint_requires_token():
     assert response.status_code == 401
     assert response.json()["error"]["code"] == "authentication_required"
 
+
+def test_garage_endpoint_requires_token():
+    response = TestClient(app).get("/api/v1/garage")
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "authentication_required"
+

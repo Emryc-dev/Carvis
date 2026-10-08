@@ -5,6 +5,7 @@ import androidx.room.PrimaryKey
 import androidx.room.TypeConverter
 import com.example.data.model.Vehicle
 import com.example.data.model.ScanTelemetry
+import com.example.data.model.VehicleRarity
 
 @Entity(tableName = "vehicles")
 data class VehicleEntity(
@@ -62,6 +63,9 @@ data class VehicleEntity(
         chassisCode = chassisCode,
         factoryPackages = factoryPackages.split(",").map { it.trim() }.filter { it.isNotEmpty() },
         imageUrl = imageUrl,
+        rarity = VehicleRarity.COMMON,
+        baseXp = 50,
+        collectionXp = 50,
         isSavedInGarage = isSavedInGarage,
         lastScannedTimestamp = lastScannedTimestamp
     )

@@ -1,4 +1,16 @@
-﻿package com.example.ui.screens
+package com.example.ui.screens
+
+import android.content.MutableContextWrapper
+import android.util.Base64
+import androidx.credentials.CredentialManager
+import androidx.credentials.CustomCredential
+import androidx.credentials.GetCredentialRequest
+import androidx.credentials.exceptions.GetCredentialCancellationException
+import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
+import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
+import kotlinx.coroutines.launch
+import java.security.MessageDigest
+import java.security.SecureRandom
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -38,11 +50,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -65,8 +79,10 @@ import com.example.ui.viewmodel.AuthUiState
 @Composable
 fun AuthScreen(
     state: AuthUiState,
+    googleWebClientId: String,
     onSignIn: (String, String) -> Unit,
     onSignUp: (String, String, String) -> Unit,
+    onGoogleSignIn: (String, String) -> Unit,
     onBack: () -> Unit,
     onModeChange: () -> Unit
 ) {
@@ -76,6 +92,11 @@ fun AuthScreen(
     var password by remember { mutableStateOf("") }
     var passwordVisible by remember { mutableStateOf(false) }
     var validation by remember { mutableStateOf<String?>(null) }
+    var googleError by remember { mutableStateOf<String?>(null) }
+    var googleBusy by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val credentialManager = remember(context) { CredentialManager.create(context) }
     val focus = LocalFocusManager.current
     val fieldColors = OutlinedTextFieldDefaults.colors(
         focusedContainerColor = SurfaceContainer,
@@ -88,6 +109,42 @@ fun AuthScreen(
         unfocusedLabelColor = TextMuted
     )
 
+    fun startGoogleSignIn() {
+        if (googleWebClientId.isBlank() || !googleWebClientId.endsWith(".apps.googleusercontent.com")) {
+            googleError = "Google Auth n’est pas configuré. Ajoutez GOOGLE_WEB_CLIENT_ID dans carvision-backend/.env."
+            return
+        }
+        scope.launch {
+            googleBusy = true
+            googleError = null
+            try {
+                val nonce = createGoogleNonce()
+                val option = GetSignInWithGoogleOption.Builder(googleWebClientId)
+                    .setNonce(nonce.hashed)
+                    .build()
+                val request = GetCredentialRequest.Builder()
+                    .addCredentialOption(option)
+                    .build()
+                val result = credentialManager.getCredential(
+                    context = MutableContextWrapper(context),
+                    request = request
+                )
+                val credential = result.credential as? CustomCredential
+                    ?: error("Réponse Google non reconnue.")
+                if (credential.type != GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
+                    error("Type d’identifiant Google non reconnu.")
+                }
+                val googleCredential = GoogleIdTokenCredential.createFrom(credential.data)
+                onGoogleSignIn(googleCredential.idToken, nonce.raw)
+            } catch (_: GetCredentialCancellationException) {
+                // The user intentionally closed the account chooser.
+            } catch (error: Exception) {
+                googleError = error.message ?: "Connexion Google impossible. Réessayez."
+            } finally {
+                googleBusy = false
+            }
+        }
+    }
     fun submit() {
         validation = when {
             signUp && name.trim().length < 2 -> "Saisissez votre nom."
@@ -197,7 +254,7 @@ fun AuthScreen(
                 modifier = Modifier.fillMaxWidth()
             )
 
-            (validation ?: state.error)?.let {
+            (googleError ?: validation ?: state.error)?.let {
                 Text(it, color = androidx.compose.material3.MaterialTheme.colorScheme.error, fontSize = 14.sp,
                     modifier = Modifier.fillMaxWidth().padding(top = 10.dp))
             }
@@ -227,9 +284,9 @@ fun AuthScreen(
                 HorizontalDivider(modifier = Modifier.weight(1f), color = TitaniumBorder)
             }
 
-            SocialButton(R.drawable.ic_google, "Continuer avec Google")
+            SocialButton(R.drawable.ic_google, if (googleBusy) "Connexion…" else "Continuer avec Google", enabled = !state.isLoading && !googleBusy, onClick = { startGoogleSignIn() })
             Spacer(Modifier.height(12.dp))
-            SocialButton(R.drawable.ic_apple, "Continuer avec Apple")
+            SocialButton(R.drawable.ic_apple, "Continuer avec Apple", enabled = false, onClick = {})
 
             TextButton(
                 onClick = {
@@ -245,16 +302,15 @@ fun AuthScreen(
                     fontWeight = FontWeight.Medium
                 )
             }
-            Text("Google et Apple seront disponibles après configuration OAuth.", color = TextMuted, fontSize = 12.sp)
         }
     }
 }
 
 @Composable
-private fun SocialButton(iconRes: Int, label: String) {
+private fun SocialButton(iconRes: Int, label: String, enabled: Boolean, onClick: () -> Unit) {
     OutlinedButton(
-        onClick = {},
-        enabled = false,
+        onClick = onClick,
+        enabled = enabled,
         shape = RoundedCornerShape(14.dp),
         modifier = Modifier.fillMaxWidth().height(54.dp),
         colors = ButtonDefaults.outlinedButtonColors(disabledContentColor = TextMuted)
@@ -268,8 +324,13 @@ private fun SocialButton(iconRes: Int, label: String) {
         Text(label, fontWeight = FontWeight.SemiBold)
     }
 }
+private data class GoogleNonce(val raw: String, val hashed: String)
 
-
-
-
-
+private fun createGoogleNonce(): GoogleNonce {
+    val randomBytes = ByteArray(32).also(SecureRandom()::nextBytes)
+    val raw = Base64.encodeToString(randomBytes, Base64.NO_WRAP or Base64.URL_SAFE or Base64.NO_PADDING)
+    val hashed = MessageDigest.getInstance("SHA-256")
+        .digest(raw.toByteArray(Charsets.UTF_8))
+        .joinToString("") { byte -> "%02x".format(byte) }
+    return GoogleNonce(raw = raw, hashed = hashed)
+}

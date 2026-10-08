@@ -1,7 +1,10 @@
-﻿import com.google.gms.googleservices.GoogleServicesPlugin.MissingGoogleServicesStrategy
+import com.android.build.gradle.internal.api.BaseVariantOutputImpl
+import com.google.gms.googleservices.GoogleServicesPlugin.MissingGoogleServicesStrategy
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
   alias(libs.plugins.android.application)
+  alias(libs.plugins.kotlin.android)
   alias(libs.plugins.kotlin.compose)
   alias(libs.plugins.google.devtools.ksp)
   alias(libs.plugins.roborazzi)
@@ -26,9 +29,10 @@ android {
     targetSdk = 36
     versionCode = 1
     versionName = "1.0"
-    buildConfigField("String", "API_BASE_URL", quoted("http://10.0.2.2:8000/api/v1"))
+    buildConfigField("String", "API_BASE_URL", quoted(backendPublicEnv["API_BASE_URL"].orEmpty()))
     buildConfigField("String", "SUPABASE_URL", quoted(backendPublicEnv["SUPABASE_URL"].orEmpty()))
     buildConfigField("String", "SUPABASE_PUBLISHABLE_KEY", quoted(backendPublicEnv["SUPABASE_PUBLISHABLE_KEY"].orEmpty()))
+    buildConfigField("String", "GOOGLE_WEB_CLIENT_ID", quoted(backendPublicEnv["GOOGLE_WEB_CLIENT_ID"].orEmpty()))
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -59,8 +63,8 @@ android {
     debug { signingConfig = signingConfigs.getByName("debugConfig") }
   }
   compileOptions {
-    sourceCompatibility = JavaVersion.VERSION_11
-    targetCompatibility = JavaVersion.VERSION_11
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
   }
   buildFeatures {
     compose = true
@@ -73,6 +77,22 @@ android {
   }
 }
 
+kotlin {
+  compilerOptions {
+    jvmTarget.set(JvmTarget.JVM_17)
+  }
+}
+
+android.applicationVariants.all {
+  outputs.all {
+    val apkOutput = this as BaseVariantOutputImpl
+    apkOutput.outputFileName = if (buildType.name == "release") {
+      "carvis.apk"
+    } else {
+      "carvis-debug.apk"
+    }
+  }
+}
 // Configure the Secrets Gradle Plugin to use .env and .env.example files
 // to match the convention used in Web projects.
 secrets {
@@ -117,9 +137,9 @@ dependencies {
   // Uncomment ALL FOUR of the following dependencies together to use Firebase Auth and Google
   // Sign-In via Credential Manager:
   // implementation(libs.firebase.auth)
-  // implementation(libs.androidx.credentials)
-  // implementation(libs.androidx.credentials.play.services)
-  // implementation(libs.googleid)
+  implementation(libs.androidx.credentials)
+  implementation(libs.androidx.credentials.play.services)
+  implementation(libs.googleid)
   implementation(libs.firebase.appcheck.recaptcha)
   implementation(libs.firebase.appcheck.debug)
   implementation(libs.kotlinx.coroutines.android)

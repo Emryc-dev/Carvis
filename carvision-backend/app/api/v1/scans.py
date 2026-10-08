@@ -15,16 +15,19 @@ from app.services.image_service import validate_image
 from app.services.redis_service import RedisService
 from app.services.scan_service import ScanService
 from app.services.storage_service import StorageService
+from app.services.xp_service import XPService
 
 router = APIRouter(prefix="/scans", tags=["scans"])
 settings = get_settings()
 storage = StorageService(settings)
 service = ScanService(settings, GeminiService(settings), RedisService(settings), storage)
+xp_service = XPService()
 
 
 async def present(scan: VehicleScan) -> ScanRead:
     dto = ScanRead.model_validate(scan)
     dto.image_url = await storage.signed_url(scan.image_path) if scan.image_path else None
+    dto.collection_xp = xp_service.calculate(scan.vehicle).total if scan.vehicle else None
     return dto
 
 

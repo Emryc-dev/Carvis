@@ -20,6 +20,14 @@ class VerificationStatus(str, enum.Enum):
     verified = "verified"
 
 
+class VehicleRarity(str, enum.Enum):
+    common = "COMMON"
+    uncommon = "UNCOMMON"
+    rare = "RARE"
+    epic = "EPIC"
+    mythic = "MYTHIC"
+
+
 class UserProfile(Base):
     __tablename__ = "user_profiles"
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
@@ -30,6 +38,7 @@ class UserProfile(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     scans: Mapped[list["VehicleScan"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    garage_entries: Mapped[list["GarageEntry"]] = relationship(back_populates="user", cascade="all, delete-orphan")
 
 
 class Vehicle(Base):
@@ -42,6 +51,14 @@ class Vehicle(Base):
     year: Mapped[int | None] = mapped_column(Integer)
     vehicle_type: Mapped[str | None] = mapped_column(String(80))
     image_url: Mapped[str | None] = mapped_column(Text)
+    rarity: Mapped[VehicleRarity] = mapped_column(
+        Enum(VehicleRarity, values_callable=lambda items: [item.value for item in items]),
+        default=VehicleRarity.common,
+        server_default=VehicleRarity.common.value,
+    )
+    base_xp: Mapped[int] = mapped_column(Integer, default=50, server_default="50")
+    rarity_score: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    market_value: Mapped[int | None] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     specifications: Mapped[list["VehicleSpecification"]] = relationship(back_populates="vehicle", cascade="all, delete-orphan")
 
@@ -111,3 +128,23 @@ class Favorite(Base):
     vehicle_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("vehicles.id", ondelete="CASCADE"), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     vehicle: Mapped[Vehicle] = relationship()
+
+
+class GarageEntry(Base):
+    __tablename__ = "garage_entries"
+    __table_args__ = (
+        UniqueConstraint("user_id", "vehicle_id", name="uq_garage_user_vehicle"),
+        Index("ix_garage_user_captured", "user_id", "captured_at"),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("user_profiles.id", ondelete="CASCADE"), index=True)
+    vehicle_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("vehicles.id", ondelete="RESTRICT"), index=True)
+    scan_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("vehicle_scans.id", ondelete="SET NULL"), index=True)
+    captured_image_path: Mapped[str | None] = mapped_column(Text)
+    captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    xp_earned: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    removed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    user: Mapped[UserProfile] = relationship(back_populates="garage_entries")
+    vehicle: Mapped[Vehicle] = relationship()
+    scan: Mapped[VehicleScan | None] = relationship()

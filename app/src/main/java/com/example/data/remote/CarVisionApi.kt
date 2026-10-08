@@ -1,9 +1,12 @@
-﻿package com.example.data.remote
+package com.example.data.remote
 
 import android.graphics.Bitmap
 import com.example.BuildConfig
 import com.example.data.model.ScanTelemetry
 import com.example.data.model.Vehicle
+import com.example.data.model.GarageEntry
+import com.example.data.model.GarageStats
+import com.example.data.model.VehicleRarity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -20,7 +23,8 @@ data class RemoteProfile(val name: String, val avatarUrl: String)
 data class RemoteSnapshot(
     val profile: RemoteProfile,
     val vehicles: List<Vehicle>,
-    val favorites: List<Vehicle>,
+    val garage: List<GarageEntry>,
+    val garageStats: GarageStats,
     val scans: List<ScanTelemetry>
 )
 
@@ -59,6 +63,29 @@ object CarVisionApi {
         snapshot()
     }
 
+    suspend fun signInWithGoogle(idToken: String, nonce: String): RemoteSnapshot = withContext(Dispatchers.IO) {
+        if (!configured()) error("Configuration mobile manquante. Renseignez API_BASE_URL, SUPABASE_URL et SUPABASE_PUBLISHABLE_KEY.")
+        val body = JSONObject()
+            .put("provider", "google")
+            .put("id_token", idToken)
+            .put("nonce", nonce)
+            .toString()
+            .toRequestBody("application/json".toMediaType())
+        val request = Request.Builder()
+            .url("$supabaseUrl/auth/v1/token?grant_type=id_token")
+            .header("apikey", publishableKey)
+            .post(body)
+            .build()
+        client.newCall(request).execute().use { response ->
+            val text = response.body?.string().orEmpty()
+            val json = runCatching { JSONObject(text) }.getOrElse { JSONObject() }
+            if (!response.isSuccessful) {
+                error(json.optString("msg").ifBlank { json.optString("error_description", "Connexion Google refusée.") })
+            }
+            accessToken = json.getString("access_token")
+        }
+        snapshot()
+    }
     suspend fun signUp(email: String, password: String, name: String): RemoteSnapshot? = withContext(Dispatchers.IO) {
         if (!configured()) error("Configuration mobile manquante. Renseignez API_BASE_URL, SUPABASE_URL et SUPABASE_PUBLISHABLE_KEY.")
         val body = JSONObject()
@@ -86,12 +113,14 @@ object CarVisionApi {
     suspend fun snapshot(): RemoteSnapshot = withContext(Dispatchers.IO) {
         val profileJson = get("/users/me")
         val vehiclesJson = get("/vehicles?limit=100")
-        val favoritesJson = getArray("/favorites")
+        val garageJson = get("/garage?limit=100")
+        val garageStatsJson = get("/garage/stats")
         val scansJson = get("/scans?limit=100")
         RemoteSnapshot(
             profile = RemoteProfile(profileJson.optString("name"), profileJson.optString("avatar_url")),
             vehicles = parseVehicles(vehiclesJson.optJSONArray("items") ?: JSONArray()),
-            favorites = parseVehicles(favoritesJson),
+            garage = parseGarageEntries(garageJson.optJSONArray("items") ?: JSONArray()),
+            garageStats = parseGarageStats(garageStatsJson),
             scans = parseScans(scansJson.optJSONArray("items") ?: JSONArray())
         )
     }
@@ -104,14 +133,20 @@ object CarVisionApi {
         val json = execute(Request.Builder().url("$apiBase/scans").header("Authorization", bearer()).post(multipart).build())
         val vehicleJson = json.optJSONObject("vehicle")
             ?: error("Le véhicule n’a pas pu être identifié.")
-        val vehicle = parseVehicle(vehicleJson)
+        val vehicle = parseVehicle(vehicleJson).copy(collectionXp = json.optInt("collection_xp", vehicleJson.optInt("base_xp", 50)))
         val telemetry = parseScan(json)
         vehicle to telemetry
     }
 
-    suspend fun setFavorite(vehicleId: String, save: Boolean) = withContext(Dispatchers.IO) {
-        val builder = Request.Builder().url("$apiBase/favorites/$vehicleId").header("Authorization", bearer())
-        execute(if (save) builder.put(ByteArray(0).toRequestBody(null)).build() else builder.delete().build(), allowEmpty = true)
+    suspend fun addToGarage(vehicleId: String, scanId: String?): GarageEntry = withContext(Dispatchers.IO) {
+        val body = JSONObject().put("vehicle_id", vehicleId).apply {
+            if (!scanId.isNullOrBlank()) put("scan_id", scanId)
+        }.toString().toRequestBody("application/json".toMediaType())
+        parseGarageEntry(execute(Request.Builder().url("$apiBase/garage").header("Authorization", bearer()).post(body).build()))
+    }
+
+    suspend fun removeFromGarage(entryId: String) = withContext(Dispatchers.IO) {
+        execute(Request.Builder().url("$apiBase/garage/$entryId").header("Authorization", bearer()).delete().build(), allowEmpty = true)
     }
 
     fun signOut() { accessToken = null }
@@ -136,7 +171,10 @@ object CarVisionApi {
             val text = response.body?.string().orEmpty()
             if (response.code == 401) error("Session expirée. Reconnectez-vous.")
             if (!response.isSuccessful) {
-                val message = runCatching { JSONObject(text).optString("message") }.getOrNull()
+                val message = runCatching {
+                    val json = JSONObject(text)
+                    json.optJSONObject("error")?.optString("message") ?: json.optString("message")
+                }.getOrNull()
                 error(message?.takeIf { it.isNotBlank() } ?: "Impossible de charger les données.")
             }
             return if (text.isBlank() && allowEmpty) JSONObject() else JSONObject(text)
@@ -175,6 +213,9 @@ object CarVisionApi {
             chassisCode = "",
             factoryPackages = emptyList(),
             imageUrl = json.optString("image_url"),
+            rarity = parseRarity(json.optString("rarity")),
+            baseXp = json.optInt("base_xp", 50),
+            collectionXp = json.optInt("base_xp", 50),
             isSavedInGarage = false,
             lastScannedTimestamp = 0
         )
@@ -197,6 +238,42 @@ object CarVisionApi {
             status = json.optString("status")
         )
     }
+
+    private fun parseRarity(value: String): VehicleRarity =
+        runCatching { VehicleRarity.valueOf(value.uppercase()) }.getOrDefault(VehicleRarity.COMMON)
+
+    private fun parseGarageEntries(array: JSONArray): List<GarageEntry> =
+        (0 until array.length()).map { parseGarageEntry(array.getJSONObject(it)) }
+
+    private fun parseGarageEntry(json: JSONObject): GarageEntry {
+        val vehicleJson = json.getJSONObject("vehicle")
+        val rarity = parseRarity(json.optString("rarity"))
+        val xp = json.optInt("xp_earned")
+        val vehicle = parseVehicle(vehicleJson).copy(
+            rarity = rarity,
+            collectionXp = xp,
+            imageUrl = json.optString("captured_image_url").ifBlank { vehicleJson.optString("image_url") },
+            isSavedInGarage = true
+        )
+        return GarageEntry(
+            id = json.getString("id"),
+            vehicle = vehicle,
+            rarity = rarity,
+            xpEarned = xp,
+            capturedAt = json.optString("captured_at"),
+            capturedImageUrl = json.optString("captured_image_url"),
+            newlyAwardedXp = json.optInt("newly_awarded_xp"),
+            alreadyCollected = json.optBoolean("already_collected")
+        )
+    }
+
+    private fun parseGarageStats(json: JSONObject) = GarageStats(
+        carsCollected = json.optInt("cars_collected"),
+        totalXp = json.optInt("total_xp"),
+        level = json.optInt("level", 1),
+        nextLevelXp = if (json.isNull("next_level_xp")) null else json.optInt("next_level_xp"),
+        progressToNextLevel = json.optDouble("progress_to_next_level").toFloat()
+    )
 }
 
 

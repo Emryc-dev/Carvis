@@ -3,7 +3,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.models.entities import ScanStatus, VerificationStatus
+from app.models.entities import ScanStatus, VehicleRarity, VerificationStatus
 from app.schemas.ai import AIIdentification
 
 
@@ -51,6 +51,10 @@ class VehicleRead(BaseModel):
     year: int | None
     vehicle_type: str | None
     image_url: str | None
+    rarity: VehicleRarity
+    base_xp: int
+    rarity_score: int
+    market_value: int | None
     specifications: list[SpecificationRead] = []
 
 
@@ -68,3 +72,50 @@ class ScanRead(BaseModel):
     created_at: datetime
     completed_at: datetime | None
     image_url: str | None = None
+    collection_xp: int | None = None
+
+
+class GarageCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    vehicle_id: uuid.UUID
+    scan_id: uuid.UUID | None = None
+
+
+class GarageVehicleRead(BaseModel):
+    id: uuid.UUID
+    brand: str
+    model: str
+    generation: str | None
+    year: int | None
+    image_url: str | None
+
+
+class GarageEntryRead(BaseModel):
+    id: uuid.UUID
+    vehicle: GarageVehicleRead
+    rarity: VehicleRarity
+    xp_earned: int
+    captured_at: datetime
+    captured_image_url: str | None = None
+    newly_awarded_xp: int = 0
+    already_collected: bool = False
+
+
+class GarageListRead(BaseModel):
+    items: list[GarageEntryRead]
+    total: int
+    limit: int
+    offset: int
+
+
+class GarageStatsRead(BaseModel):
+    cars_collected: int
+    total_xp: int
+    level: int
+    next_level_xp: int | None
+    progress_to_next_level: float
+
+
+class GarageCheckRead(BaseModel):
+    collected: bool
+    entry_id: uuid.UUID | None = None

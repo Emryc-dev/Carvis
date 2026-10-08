@@ -26,8 +26,32 @@ data class Vehicle(
     val chassisCode: String,
     val factoryPackages: List<String>,
     val imageUrl: String,
+    val rarity: VehicleRarity = VehicleRarity.COMMON,
+    val baseXp: Int = 50,
+    val collectionXp: Int = baseXp,
     val isSavedInGarage: Boolean = false,
     val lastScannedTimestamp: Long = System.currentTimeMillis()
+)
+
+enum class VehicleRarity { COMMON, UNCOMMON, RARE, EPIC, MYTHIC }
+
+data class GarageEntry(
+    val id: String,
+    val vehicle: Vehicle,
+    val rarity: VehicleRarity,
+    val xpEarned: Int,
+    val capturedAt: String,
+    val capturedImageUrl: String,
+    val newlyAwardedXp: Int = 0,
+    val alreadyCollected: Boolean = false
+)
+
+data class GarageStats(
+    val carsCollected: Int = 0,
+    val totalXp: Int = 0,
+    val level: Int = 1,
+    val nextLevelXp: Int? = 500,
+    val progressToNextLevel: Float = 0f
 )
 
 data class ScanTelemetry(

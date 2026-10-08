@@ -1,4 +1,4 @@
-﻿package com.example
+package com.example
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -18,10 +18,17 @@ import com.example.ui.navigation.Screen
 import com.example.ui.screens.AdminMonitoringScreen
 import com.example.ui.screens.AuthScreen
 import com.example.ui.screens.DashboardScreen
+import com.example.ui.screens.HomeScreen
+import com.example.ui.screens.CarVisionHomeScreen
+import com.example.ui.screens.CarVisionOnboardingScreen
 import com.example.ui.screens.GarageProfileScreen
 import com.example.ui.screens.GarageTab
+import com.example.ui.screens.HistoryScreen
+import com.example.ui.screens.GarageScreen
+import com.example.ui.screens.GarageDetailScreen
 import com.example.ui.screens.OnboardingScreen
 import com.example.ui.screens.ScannerScreen
+import com.example.ui.screens.CaptureScreen
 import com.example.ui.screens.SplashScreen
 import com.example.ui.screens.VehicleCompareScreen
 import com.example.ui.screens.VehicleResultScreen
@@ -41,13 +48,17 @@ class MainActivity : ComponentActivity() {
 fun CarVisionApp(viewModel: CarVisionViewModel = viewModel()) {
     val nav = rememberNavController()
     val vehicles by viewModel.allVehicles.collectAsState()
-    val garage by viewModel.garageVehicles.collectAsState()
+    val garage by viewModel.garageEntries.collectAsState()
+    val garageStats by viewModel.garageStats.collectAsState()
+    val garageState by viewModel.garageUiState.collectAsState()
+    val selectedGarageEntry by viewModel.selectedGarageEntry.collectAsState()
     val history by viewModel.scanHistory.collectAsState()
     val selected by viewModel.selectedVehicle.collectAsState()
     val left by viewModel.compareVehicleLeft.collectAsState()
     val right by viewModel.compareVehicleRight.collectAsState()
     val profile by viewModel.userProfile.collectAsState()
     val authState by viewModel.authUiState.collectAsState()
+    val scanState by viewModel.scanWorkflow.collectAsState()
 
     NavHost(navController = nav, startDestination = Screen.Splash.route, modifier = Modifier.fillMaxSize()) {
         composable(Screen.Splash.route) {
@@ -60,14 +71,15 @@ fun CarVisionApp(viewModel: CarVisionViewModel = viewModel()) {
             SplashScreen()
         }
         composable(Screen.Onboarding.route) {
-            OnboardingScreen(
-                onGetStarted = { nav.navigate(Screen.Auth.route) },
+            CarVisionOnboardingScreen(
+                onComplete = { nav.navigate(Screen.Auth.route) },
                 onSignIn = { nav.navigate(Screen.Auth.route) }
             )
         }
         composable(Screen.Auth.route) {
             AuthScreen(
                 state = authState,
+                googleWebClientId = BuildConfig.GOOGLE_WEB_CLIENT_ID,
                 onSignIn = { email, password ->
                     viewModel.signIn(email, password) {
                         nav.navigate(Screen.Dashboard.route) { popUpTo(Screen.Auth.route) { inclusive = true } }
@@ -78,27 +90,32 @@ fun CarVisionApp(viewModel: CarVisionViewModel = viewModel()) {
                         nav.navigate(Screen.Dashboard.route) { popUpTo(Screen.Auth.route) { inclusive = true } }
                     }
                 },
+                onGoogleSignIn = { idToken, nonce ->
+                    viewModel.signInWithGoogle(idToken, nonce) {
+                        nav.navigate(Screen.Dashboard.route) { popUpTo(Screen.Auth.route) { inclusive = true } }
+                    }
+                },
                 onBack = { nav.popBackStack() },
                 onModeChange = viewModel::clearAuthMessage
             )
         }
         composable(Screen.Dashboard.route) {
-            DashboardScreen(
+            CarVisionHomeScreen(
                 userName = profile.name,
                 avatarUrl = profile.avatarUrl,
-                vehicles = vehicles,
                 latestVehicle = selected,
+                scanState = scanState,
                 onNavigate = { route -> if (route != Screen.Dashboard.route) nav.navigate(route) },
                 onSelectVehicle = viewModel::selectVehicle,
-                onScanPhotoPicked = { bitmap ->
-                    viewModel.analyzePhoto(bitmap) {
+                onImportPhoto = { uri ->
+                    viewModel.analyzePhotoUri(uri) {
                         nav.navigate(Screen.VehicleResult.route)
                     }
                 }
             )
         }
         composable(Screen.Scanner.route) {
-            ScannerScreen(
+            CaptureScreen(
                 viewModel = viewModel,
                 onBackClick = { nav.popBackStack() },
                 onScanFinished = { vehicle ->
@@ -112,6 +129,7 @@ fun CarVisionApp(viewModel: CarVisionViewModel = viewModel()) {
         composable(Screen.VehicleResult.route) {
             VehicleResultScreen(
                 vehicle = selected,
+                garageState = garageState,
                 onBackClick = { nav.popBackStack() },
                 onCompareClick = { vehicle ->
                     vehicles.firstOrNull { it.id != vehicle.id }?.let {
@@ -119,7 +137,8 @@ fun CarVisionApp(viewModel: CarVisionViewModel = viewModel()) {
                         nav.navigate(Screen.Compare.route)
                     }
                 },
-                onToggleGarage = viewModel::toggleGarage
+                onAddToGarage = viewModel::addToGarage,
+                onNotNow = { nav.navigate(Screen.Dashboard.route) { popUpTo(Screen.Dashboard.route) { inclusive = false } } }
             )
         }
         composable(Screen.Compare.route) {
@@ -135,37 +154,25 @@ fun CarVisionApp(viewModel: CarVisionViewModel = viewModel()) {
             )
         }
         composable(Screen.Garage.route) {
-            GarageProfileScreen(
-                viewModel = viewModel,
-                garageVehicles = garage,
-                scanHistory = history,
-                onSelectVehicle = { vehicle ->
-                    viewModel.selectVehicle(vehicle)
-                    nav.navigate(Screen.VehicleResult.route)
-                },
-                onNavigate = { route -> if (route != Screen.Garage.route) nav.navigate(route) },
-                onSignOut = {
-                    viewModel.signOut()
-                    nav.navigate(Screen.Auth.route) { popUpTo(0) { inclusive = true } }
-                }
+            GarageScreen(
+                entries = garage,
+                stats = garageStats,
+                state = garageState,
+                onRetry = viewModel::refreshGarage,
+                onScan = { nav.navigate(Screen.Scanner.route) },
+                onSelect = { entry -> viewModel.selectGarageEntry(entry); nav.navigate(Screen.GarageDetail.route) },
+                onNavigate = { route -> if (route != Screen.Garage.route) nav.navigate(route) }
+            )
+        }
+        composable(Screen.GarageDetail.route) {
+            GarageDetailScreen(
+                entry = selectedGarageEntry,
+                onBack = { nav.popBackStack() },
+                onRemove = { entry -> viewModel.removeFromGarage(entry); nav.popBackStack() }
             )
         }
         composable(Screen.History.route) {
-            GarageProfileScreen(
-                initialTab = GarageTab.History,
-                viewModel = viewModel,
-                garageVehicles = garage,
-                scanHistory = history,
-                onSelectVehicle = { vehicle ->
-                    viewModel.selectVehicle(vehicle)
-                    nav.navigate(Screen.VehicleResult.route)
-                },
-                onNavigate = { route -> if (route != Screen.History.route) nav.navigate(route) },
-                onSignOut = {
-                    viewModel.signOut()
-                    nav.navigate(Screen.Auth.route) { popUpTo(0) { inclusive = true } }
-                }
-            )
+            HistoryScreen(scans = history, onNavigate = { route -> if (route != Screen.History.route) nav.navigate(route) })
         }
         composable(Screen.Admin.route) { AdminMonitoringScreen { nav.popBackStack() } }
     }

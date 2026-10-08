@@ -48,7 +48,7 @@ import com.example.ui.theme.TitaniumBorder
 fun HUDVisualReticle(
     modifier: Modifier = Modifier,
     isScanning: Boolean = true,
-    lidarDepth: String = "2.41m",
+    lidarDepth: String = "",
     chassisCode: String = "G82 VERIFIED",
     colorIdentified: String = "Isle of Man Green",
     showWireframe: Boolean = false

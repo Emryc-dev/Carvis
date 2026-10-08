@@ -10,6 +10,7 @@ sealed class Screen(val route: String) {
     object VehicleResult : Screen("vehicle_result")
     object Compare : Screen("compare")
     object Garage : Screen("garage")
+    object GarageDetail : Screen("garage_detail")
     object Admin : Screen("admin")
 }
 

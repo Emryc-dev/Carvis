@@ -1,3 +1,3 @@
-from app.models.entities import AIRequest, Favorite, UserProfile, Vehicle, VehicleScan, VehicleSpecification
+from app.models.entities import AIRequest, Favorite, GarageEntry, UserProfile, Vehicle, VehicleRarity, VehicleScan, VehicleSpecification
 
-__all__ = ["AIRequest", "Favorite", "UserProfile", "Vehicle", "VehicleScan", "VehicleSpecification"]
+__all__ = ["AIRequest", "Favorite", "GarageEntry", "UserProfile", "Vehicle", "VehicleRarity", "VehicleScan", "VehicleSpecification"]
