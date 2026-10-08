@@ -5,20 +5,27 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.example.ui.navigation.Screen
+import com.example.ui.components.InAppNotification
+import com.example.ui.components.InAppNotificationHost
 import com.example.ui.screens.AdminMonitoringScreen
 import com.example.ui.screens.AuthScreen
 import com.example.ui.screens.DashboardScreen
-import com.example.ui.screens.HomeScreen
 import com.example.ui.screens.CarVisionHomeScreen
 import com.example.ui.screens.CarVisionOnboardingScreen
 import com.example.ui.screens.GarageProfileScreen
@@ -26,15 +33,12 @@ import com.example.ui.screens.GarageTab
 import com.example.ui.screens.HistoryScreen
 import com.example.ui.screens.GarageScreen
 import com.example.ui.screens.GarageDetailScreen
-import com.example.ui.screens.OnboardingScreen
-import com.example.ui.screens.ScannerScreen
-import com.example.ui.screens.CaptureScreen
+import com.example.ui.screens.ScanExperienceScreen
 import com.example.ui.screens.SplashScreen
 import com.example.ui.screens.VehicleCompareScreen
 import com.example.ui.screens.VehicleResultScreen
 import com.example.ui.theme.CarVisionTheme
 import com.example.ui.viewmodel.CarVisionViewModel
-import kotlinx.coroutines.delay
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -59,13 +63,38 @@ fun CarVisionApp(viewModel: CarVisionViewModel = viewModel()) {
     val profile by viewModel.userProfile.collectAsState()
     val authState by viewModel.authUiState.collectAsState()
     val scanState by viewModel.scanWorkflow.collectAsState()
+    var notification by remember { mutableStateOf<InAppNotification?>(null) }
+    val showError: (String) -> Unit = { message ->
+        if (message.isNotBlank()) notification = InAppNotification(message = message)
+    }
 
+    LaunchedEffect(authState.error) {
+        authState.error?.let {
+            showError(it)
+            viewModel.consumeAuthError()
+        }
+    }
+    LaunchedEffect(garageState.error) {
+        garageState.error?.let {
+            showError(it)
+            viewModel.consumeGarageError()
+        }
+    }
+    LaunchedEffect(scanState.error) {
+        scanState.error?.let {
+            showError(it)
+            viewModel.consumeScanError()
+        }
+    }
+
+    Box(Modifier.fillMaxSize()) {
     NavHost(navController = nav, startDestination = Screen.Splash.route, modifier = Modifier.fillMaxSize()) {
         composable(Screen.Splash.route) {
             LaunchedEffect(Unit) {
-                delay(1100)
-                nav.navigate(Screen.Onboarding.route) {
-                    popUpTo(Screen.Splash.route) { inclusive = true }
+                viewModel.restoreSession { restored ->
+                    nav.navigate(if (restored) Screen.Dashboard.route else Screen.Onboarding.route) {
+                        popUpTo(Screen.Splash.route) { inclusive = true }
+                    }
                 }
             }
             SplashScreen()
@@ -96,7 +125,8 @@ fun CarVisionApp(viewModel: CarVisionViewModel = viewModel()) {
                     }
                 },
                 onBack = { nav.popBackStack() },
-                onModeChange = viewModel::clearAuthMessage
+                onModeChange = viewModel::clearAuthMessage,
+                onError = showError,
             )
         }
         composable(Screen.Dashboard.route) {
@@ -108,19 +138,21 @@ fun CarVisionApp(viewModel: CarVisionViewModel = viewModel()) {
                 onNavigate = { route -> if (route != Screen.Dashboard.route) nav.navigate(route) },
                 onSelectVehicle = viewModel::selectVehicle,
                 onImportPhoto = { uri ->
-                    viewModel.analyzePhotoUri(uri) {
-                        nav.navigate(Screen.VehicleResult.route)
-                    }
+                    viewModel.analyzePhotoUri(uri)
+                    nav.navigate(Screen.Scanner.route)
                 }
             )
         }
         composable(Screen.Scanner.route) {
-            CaptureScreen(
+            ScanExperienceScreen(
                 viewModel = viewModel,
-                onBackClick = { nav.popBackStack() },
-                onScanFinished = { vehicle ->
-                    viewModel.selectVehicle(vehicle)
-                    nav.navigate(Screen.VehicleResult.route) {
+                onError = showError,
+                onBack = {
+                    viewModel.resetScan()
+                    nav.popBackStack()
+                },
+                onViewGarage = {
+                    nav.navigate(Screen.Garage.route) {
                         popUpTo(Screen.Scanner.route) { inclusive = true }
                     }
                 }
@@ -175,6 +207,12 @@ fun CarVisionApp(viewModel: CarVisionViewModel = viewModel()) {
             HistoryScreen(scans = history, onNavigate = { route -> if (route != Screen.History.route) nav.navigate(route) })
         }
         composable(Screen.Admin.route) { AdminMonitoringScreen { nav.popBackStack() } }
+    }
+        InAppNotificationHost(
+            notification = notification,
+            onDismiss = { notification = null },
+            modifier = Modifier.align(Alignment.TopCenter).statusBarsPadding(),
+        )
     }
 }
 

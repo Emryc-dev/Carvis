@@ -47,11 +47,6 @@ fun GarageScreen(
                 CircularProgressIndicator(color = CyberCyan)
                 Text("Chargement de votre Garage…", color = TextMuted, modifier = Modifier.padding(top = 16.dp))
             }
-            state.error != null && entries.isEmpty() -> Column(Modifier.fillMaxSize().padding(padding).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                Text("Impossible de charger votre Garage.", color = TextWhite, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
-                Text(state.error, color = TextMuted, modifier = Modifier.padding(top = 8.dp, bottom = 18.dp))
-                Button(onClick = onRetry) { Text("Réessayer") }
-            }
             else -> LazyVerticalGrid(
                 columns = GridCells.Fixed(2), modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -69,7 +64,6 @@ fun GarageScreen(
                                 LinearProgressIndicator(progress = { stats.progressToNextLevel }, modifier = Modifier.fillMaxWidth(), color = CyberCyan)
                             }
                         }
-                        if (state.error != null) Text("Mise à jour impossible. Les données précédentes restent affichées.", color = TextMuted, fontSize = 12.sp)
                     }
                 }
                 if (entries.isEmpty()) {
@@ -77,7 +71,10 @@ fun GarageScreen(
                         Column(Modifier.fillMaxWidth().padding(vertical = 70.dp, horizontal = 20.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
                             Text("Votre Garage est vide", color = TextWhite, fontSize = 21.sp, fontWeight = FontWeight.SemiBold)
                             Text("Scannez une voiture et ajoutez-la à votre collection.", color = TextMuted)
-                            Button(onClick = onScan, colors = ButtonDefaults.buttonColors(containerColor = CyberCyan, contentColor = CyanDark)) { Text("SCANNER UN VÉHICULE") }
+                            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                Button(onClick = onScan, colors = ButtonDefaults.buttonColors(containerColor = CyberCyan, contentColor = CyanDark)) { Text("SCANNER") }
+                                Button(onClick = onRetry, colors = ButtonDefaults.buttonColors(containerColor = SurfaceContainerLow, contentColor = TextWhite)) { Text("ACTUALISER") }
+                            }
                         }
                     }
                 } else items(entries, key = { it.id }) { entry -> GarageVehicleCard(entry) { onSelect(entry) } }

@@ -90,7 +90,6 @@ fun CarVisionHomeScreen(
                     Text(if (scanState.isScanning) "  Analyse en cours…" else "  Importer depuis la galerie", color = TextWhite, fontWeight = FontWeight.Medium)
                 }
             }
-            scanState.error?.let { Text(it, color = androidx.compose.material3.MaterialTheme.colorScheme.error, fontSize = 13.sp) }
 
             Spacer(Modifier.height(8.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {

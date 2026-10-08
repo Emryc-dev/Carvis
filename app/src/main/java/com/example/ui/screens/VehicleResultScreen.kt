@@ -45,7 +45,6 @@ fun VehicleResultScreen(
             val feedback = when {
                 garageState.awardedXp != null -> "+${garageState.awardedXp} XP ajoutés à votre collection"
                 garageState.alreadyCollected || visibleVehicle.isSavedInGarage -> "Déjà dans votre Garage"
-                garageState.error != null -> garageState.error
                 else -> null
             }
             Column(

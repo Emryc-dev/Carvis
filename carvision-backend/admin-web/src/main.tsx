@@ -14,6 +14,7 @@ import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import {
   Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupLabel,
   SidebarHeader, SidebarInset, SidebarMenu, SidebarMenuButton, SidebarMenuItem,
@@ -29,11 +30,22 @@ const supabase = createClient(supabaseUrl, supabaseKey)
 type Page = "overview" | "scans" | "users" | "vehicles" | "system"
 type Metrics = { users: number; vehicles: number; scans: number; scans_last_30_days: number; completed_scans: number; failed_scans: number; ai_requests: number; favorites: number; average_confidence: number | null }
 type Scan = { id: string; status: string; confidence: number | null; created_at: string; completed_at?: string | null; error_code?: string | null; user_id: string; user_name?: string | null; vehicle?: { id?: string | null; brand?: string | null; model?: string | null; year?: number | null } }
-type User = { id: string; auth_user_id: string; name?: string | null; avatar_url?: string | null; created_at: string; scan_count: number }
+type User = { id: string | null; auth_user_id: string; email?: string | null; phone?: string | null; name?: string | null; avatar_url?: string | null; created_at: string; confirmed_at?: string | null; last_sign_in_at?: string | null; providers: string[]; scan_count: number }
 type Vehicle = { id: string; brand: string; model: string; generation?: string | null; year?: number | null; vehicle_type?: string | null; image_url?: string | null; created_at: string }
 type Overview = { metrics: Metrics; scan_trend: { day: string; count: number }[]; recent_scans: Scan[] }
 type ListResponse<T> = { items: T[]; total: number; limit: number; offset: number }
 type SystemState = { health?: unknown; ready?: unknown }
+type UserDetail = {
+  auth_user_id: string; email?: string | null; phone?: string | null; created_at: string; updated_at?: string | null;
+  confirmed_at?: string | null; last_sign_in_at?: string | null; providers: string[];
+  app_metadata: Record<string, unknown>; user_metadata: Record<string, unknown>;
+  profile: { id?: string | null; name?: string | null; avatar_url?: string | null; settings: Record<string, unknown>; created_at?: string | null; updated_at?: string | null };
+  summary: { scans: number; favorites: number; garage_entries: number; ai_requests: number };
+  scans: Scan[];
+  favorites: Array<{ id: string; created_at: string; vehicle: { id: string; brand: string; model: string; year?: number | null } }>;
+  garage: Array<{ id: string; scan_id?: string | null; captured_at: string; xp_earned: number; removed_at?: string | null; vehicle: { id: string; brand: string; model: string; year?: number | null } }>;
+  ai_requests: Array<{ id: string; scan_id: string; provider: string; model: string; status: string; latency_ms?: number | null; error_code?: string | null; created_at: string }>;
+}
 
 type ApiError = Error & { status?: number }
 
@@ -64,10 +76,23 @@ function AuthScreen() {
   const [isError, setIsError] = useState(false)
   const [busy, setBusy] = useState(false)
 
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const hash = new URLSearchParams(window.location.hash.replace(/^#/, ""))
+    const oauthError = params.get("error_description") || hash.get("error_description") || params.get("error") || hash.get("error")
+    if (oauthError) {
+      setIsError(true)
+      setMessage(decodeURIComponent(oauthError.replace(/\+/g, " ")))
+    }
+  }, [])
+
   async function googleSignIn() {
     setBusy(true); setMessage(""); setIsError(false)
     try {
-      const { error } = await supabase.auth.signInWithOAuth({ provider: "google", options: { redirectTo: window.location.origin } })
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: { redirectTo: `${window.location.origin}/`, queryParams: { prompt: "select_account" } },
+      })
       if (error) throw error
     } catch (caught) {
       setIsError(true)
@@ -125,6 +150,10 @@ function AdminApp({ session }: { session: Session }) {
   const [total, setTotal] = useState(0)
   const [offset, setOffset] = useState(0)
   const [selected, setSelected] = useState<Scan | User | Vehicle | null>(null)
+  const [userDetail, setUserDetail] = useState<UserDetail | null>(null)
+  const [userDetailOpen, setUserDetailOpen] = useState(false)
+  const [userDetailLoading, setUserDetailLoading] = useState(false)
+  const [userDetailError, setUserDetailError] = useState("")
   const [system, setSystem] = useState<SystemState>({})
   const [dark, setDark] = useState(() => localStorage.getItem("carvision-theme") !== "light")
   const limit = 20
@@ -159,6 +188,16 @@ function AdminApp({ session }: { session: Session }) {
   }, [overview, debouncedQuery])
 
   function navigate(next: Page) { setPage(next); setOffset(0); setQuery(""); window.location.hash = next }
+  async function selectRecord(value: Scan | User | Vehicle) {
+    if ("auth_user_id" in value) {
+      setUserDetailOpen(true); setUserDetailLoading(true); setUserDetailError(""); setUserDetail(null)
+      try { setUserDetail(await apiRequest<UserDetail>(`/api/v1/admin/users/${value.auth_user_id}`, session)) }
+      catch (caught) { setUserDetailError(caught instanceof Error ? caught.message : "Unable to load user details.") }
+      finally { setUserDetailLoading(false) }
+      return
+    }
+    setSelected(value)
+  }
 
   return <TooltipProvider>
     <SidebarProvider>
@@ -179,8 +218,9 @@ function AdminApp({ session }: { session: Session }) {
         </header>
         <main className="mx-auto flex w-full max-w-7xl flex-1 flex-col gap-5 p-4 md:p-6">
           <div className={page === "system" ? "hidden" : "relative md:hidden"}><Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"/><Input className="pl-9" aria-label="Search dashboard records" placeholder="Search..." value={query} onChange={event => setQuery(event.target.value)}/></div>
-          {error ? <ErrorState error={error} retry={load}/> : loading ? <LoadingState/> : page === "overview" ? <OverviewView data={overview} scans={filteredRecent} select={setSelected}/> : page === "system" ? <SystemView state={system}/> : <ListView page={page} rows={rows} total={total} offset={offset} limit={limit} select={setSelected} previous={() => setOffset(value => Math.max(0, value - limit))} next={() => setOffset(value => value + limit)}/>} 
+          {error ? <ErrorState error={error} retry={load}/> : loading ? <LoadingState/> : page === "overview" ? <OverviewView data={overview} scans={filteredRecent} select={setSelected}/> : page === "system" ? <SystemView state={system}/> : <ListView page={page} rows={rows} total={total} offset={offset} limit={limit} select={selectRecord} previous={() => setOffset(value => Math.max(0, value - limit))} next={() => setOffset(value => value + limit)}/>} 
           {selected && <SelectedRecord value={selected} close={() => setSelected(null)}/>} 
+          <UserDetailSheet open={userDetailOpen} onOpenChange={setUserDetailOpen} detail={userDetail} loading={userDetailLoading} error={userDetailError}/>
         </main>
       </SidebarInset>
     </SidebarProvider>
@@ -211,9 +251,9 @@ function ListView({ page, rows, total, offset, limit, select, previous, next }: 
 }
 
 function RecordsTable({ page, rows, select }: { page: Page; rows: Array<Scan | User | Vehicle>; select: (row: Scan | User | Vehicle) => void }) {
-  return <Card><CardHeader><CardTitle>{page === "scans" ? "Recent scans" : page[0].toUpperCase() + page.slice(1)}</CardTitle><CardDescription>Select a row to inspect its stored fields.</CardDescription></CardHeader><CardContent className="overflow-x-auto p-0"><Table><TableHeader><TableRow>{page === "scans" ? <><TableHead>Vehicle</TableHead><TableHead>User</TableHead><TableHead>Status</TableHead><TableHead>Confidence</TableHead><TableHead>Date</TableHead></> : page === "users" ? <><TableHead>Name</TableHead><TableHead>Scans</TableHead><TableHead>Joined</TableHead></> : <><TableHead>Vehicle</TableHead><TableHead>Generation</TableHead><TableHead>Type</TableHead><TableHead>Added</TableHead></>}</TableRow></TableHeader><TableBody>{rows.map(row => {
+  return <Card><CardHeader><CardTitle>{page === "scans" ? "Recent scans" : page[0].toUpperCase() + page.slice(1)}</CardTitle><CardDescription>Select a row to inspect its stored fields.</CardDescription></CardHeader><CardContent className="overflow-x-auto p-0"><Table><TableHeader><TableRow>{page === "scans" ? <><TableHead>Vehicle</TableHead><TableHead>User</TableHead><TableHead>Status</TableHead><TableHead>Confidence</TableHead><TableHead>Date</TableHead></> : page === "users" ? <><TableHead>Name</TableHead><TableHead>Email</TableHead><TableHead>Provider</TableHead><TableHead>Scans</TableHead><TableHead>Last sign-in</TableHead></> : <><TableHead>Vehicle</TableHead><TableHead>Generation</TableHead><TableHead>Type</TableHead><TableHead>Added</TableHead></>}</TableRow></TableHeader><TableBody>{rows.map(row => {
     if ("status" in row) return <TableRow className="cursor-pointer" key={row.id} onClick={() => select(row)}><TableCell className="font-medium">{[row.vehicle?.brand, row.vehicle?.model].filter(Boolean).join(" ") || "Unidentified"}</TableCell><TableCell>{row.user_name || "Unnamed user"}</TableCell><TableCell><StatusBadge value={row.status}/></TableCell><TableCell>{row.confidence == null ? "Not available" : `${Math.round(row.confidence * 100)}%`}</TableCell><TableCell>{new Date(row.created_at).toLocaleString()}</TableCell></TableRow>
-    if ("auth_user_id" in row) return <TableRow className="cursor-pointer" key={row.id} onClick={() => select(row)}><TableCell className="font-medium">{row.name || "Unnamed user"}</TableCell><TableCell>{row.scan_count}</TableCell><TableCell>{new Date(row.created_at).toLocaleDateString()}</TableCell></TableRow>
+    if ("auth_user_id" in row) return <TableRow className="cursor-pointer" key={row.auth_user_id} onClick={() => select(row)}><TableCell className="font-medium">{row.name || "Unnamed user"}</TableCell><TableCell>{row.email || "Not available"}</TableCell><TableCell>{row.providers.join(", ") || "email"}</TableCell><TableCell>{row.scan_count}</TableCell><TableCell>{row.last_sign_in_at ? new Date(row.last_sign_in_at).toLocaleString() : "Never"}</TableCell></TableRow>
     return <TableRow className="cursor-pointer" key={row.id} onClick={() => select(row)}><TableCell className="font-medium">{row.brand} {row.model} {row.year || ""}</TableCell><TableCell>{row.generation || "Not available"}</TableCell><TableCell>{row.vehicle_type || "Not available"}</TableCell><TableCell>{new Date(row.created_at).toLocaleDateString()}</TableCell></TableRow>
   })}</TableBody></Table></CardContent></Card>
 }
@@ -221,6 +261,58 @@ function RecordsTable({ page, rows, select }: { page: Page; rows: Array<Scan | U
 function StatusBadge({ value }: { value: string }) { const variant = value === "completed" ? "default" : value === "failed" ? "destructive" : "secondary"; return <Badge variant={variant}>{value}</Badge> }
 function EmptyState({ text }: { text: string }) { return <div className="flex min-h-40 items-center justify-center rounded-xl border border-dashed p-8 text-center text-sm text-muted-foreground">{text}</div> }
 function SelectedRecord({ value, close }: { value: Scan | User | Vehicle; close: () => void }) { return <Card className="border-primary/30"><CardHeader className="flex-row items-start justify-between"><div><CardTitle>Record details</CardTitle><CardDescription>Values returned by the admin API.</CardDescription></div><Button variant="ghost" onClick={close}>Close</Button></CardHeader><CardContent><pre className="max-h-80 overflow-auto rounded-lg bg-muted p-4 text-xs">{JSON.stringify(value, null, 2)}</pre></CardContent></Card> }
+
+function UserDetailSheet({ open, onOpenChange, detail, loading, error }: { open: boolean; onOpenChange: (open: boolean) => void; detail: UserDetail | null; loading: boolean; error: string }) {
+  const activities = useMemo(() => {
+    if (!detail) return []
+    const events: Array<{ id: string; date: string; title: string; description: string }> = [
+      { id: "account-created", date: detail.created_at, title: "Account created", description: detail.providers.length ? `Authentication: ${detail.providers.join(", ")}` : "Authentication account created" },
+    ]
+    if (detail.last_sign_in_at) events.push({ id: "last-sign-in", date: detail.last_sign_in_at, title: "Last sign-in", description: detail.email || "Authenticated user" })
+    detail.scans.forEach(scan => events.push({ id: `scan-${scan.id}`, date: scan.created_at, title: `Vehicle scan ${scan.status}`, description: [scan.vehicle?.brand, scan.vehicle?.model, scan.vehicle?.year].filter(Boolean).join(" ") || "Unidentified vehicle" }))
+    detail.favorites.forEach(item => events.push({ id: `favorite-${item.id}`, date: item.created_at, title: "Vehicle added to favorites", description: `${item.vehicle.brand} ${item.vehicle.model}` }))
+    detail.garage.forEach(item => events.push({ id: `garage-${item.id}`, date: item.captured_at, title: item.removed_at ? "Vehicle removed from garage" : "Vehicle added to garage", description: `${item.vehicle.brand} ${item.vehicle.model}, ${item.xp_earned} XP` }))
+    detail.ai_requests.forEach(item => events.push({ id: `ai-${item.id}`, date: item.created_at, title: `AI request ${item.status}`, description: `${item.provider} / ${item.model}${item.latency_ms != null ? `, ${item.latency_ms} ms` : ""}` }))
+    return events.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+  }, [detail])
+
+  return <Sheet open={open} onOpenChange={onOpenChange}>
+    <SheetContent className="w-full overflow-y-auto sm:max-w-2xl">
+      <SheetHeader className="border-b pr-14">
+        <SheetTitle>{detail?.profile.name || detail?.email || "User details"}</SheetTitle>
+        <SheetDescription>{detail?.email || "Loading the complete account and activity history."}</SheetDescription>
+      </SheetHeader>
+      <div className="space-y-6 px-4 pb-8">
+        {loading ? <div className="space-y-3"><Skeleton className="h-24 w-full"/><Skeleton className="h-56 w-full"/></div> : error ? <div role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">{error}</div> : detail ? <>
+          <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            {Object.entries(detail.summary).map(([label, value]) => <div key={label} className="rounded-lg border p-3"><p className="text-xs capitalize text-muted-foreground">{label.replace("_", " ")}</p><p className="mt-1 font-mono text-2xl font-semibold">{value}</p></div>)}
+          </section>
+          <section className="space-y-3">
+            <h3 className="font-semibold">Account</h3>
+            <dl className="grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
+              <div><dt className="text-muted-foreground">Email</dt><dd className="break-all font-medium">{detail.email || "Not available"}</dd></div>
+              <div><dt className="text-muted-foreground">Phone</dt><dd>{detail.phone || "Not available"}</dd></div>
+              <div><dt className="text-muted-foreground">Providers</dt><dd>{detail.providers.join(", ") || "email"}</dd></div>
+              <div><dt className="text-muted-foreground">Confirmed</dt><dd>{detail.confirmed_at ? new Date(detail.confirmed_at).toLocaleString() : "Not confirmed"}</dd></div>
+              <div><dt className="text-muted-foreground">Created</dt><dd>{new Date(detail.created_at).toLocaleString()}</dd></div>
+              <div><dt className="text-muted-foreground">Last sign-in</dt><dd>{detail.last_sign_in_at ? new Date(detail.last_sign_in_at).toLocaleString() : "Never"}</dd></div>
+              <div className="sm:col-span-2"><dt className="text-muted-foreground">Auth user ID</dt><dd className="break-all font-mono text-xs">{detail.auth_user_id}</dd></div>
+            </dl>
+          </section>
+          <section className="space-y-3">
+            <div><h3 className="font-semibold">Activity</h3><p className="text-sm text-muted-foreground">Authentication, scans, AI processing, favorites and garage activity recorded by CarVision.</p></div>
+            {activities.length ? <div className="divide-y rounded-lg border">{activities.map(activity => <div key={activity.id} className="grid gap-1 p-3 sm:grid-cols-[10rem_1fr]"><time className="text-xs text-muted-foreground">{new Date(activity.date).toLocaleString()}</time><div><p className="font-medium">{activity.title}</p><p className="text-sm text-muted-foreground">{activity.description}</p></div></div>)}</div> : <EmptyState text="No recorded activity for this user."/>}
+          </section>
+          <section className="space-y-3">
+            <h3 className="font-semibold">Stored metadata</h3>
+            <pre className="max-h-64 overflow-auto rounded-lg bg-muted p-4 text-xs">{JSON.stringify({ user_metadata: detail.user_metadata, app_metadata: detail.app_metadata, profile_settings: detail.profile.settings }, null, 2)}</pre>
+          </section>
+        </> : null}
+      </div>
+    </SheetContent>
+  </Sheet>
+}
+
 function SystemView({ state }: { state: SystemState }) { const ready = (state.ready as { status?: string })?.status === "ready"; return <div className="grid gap-4 md:grid-cols-2"><Card><CardHeader><CardTitle className="flex items-center gap-2">{state.health ? <CheckCircle2 className="text-emerald-500"/> : <CircleAlert/>}API health</CardTitle><CardDescription>Response from the public health endpoint.</CardDescription></CardHeader><CardContent><pre className="overflow-auto rounded-lg bg-muted p-4 text-xs">{JSON.stringify(state.health, null, 2)}</pre></CardContent></Card><Card><CardHeader><CardTitle className="flex items-center gap-2">{ready ? <CheckCircle2 className="text-emerald-500"/> : <CircleAlert className="text-amber-500"/>}Dependencies</CardTitle><CardDescription>Backend configuration readiness.</CardDescription></CardHeader><CardContent><pre className="overflow-auto rounded-lg bg-muted p-4 text-xs">{JSON.stringify(state.ready, null, 2)}</pre></CardContent></Card></div> }
 
 function Root() {

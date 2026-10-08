@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     upstash_redis_rest_token: str = ""
     gemini_api_key: str = ""
     gemini_model: str = "gemini-2.5-flash"
+    gemini_fallback_model: str = "gemini-3.5-flash-lite"
     cors_origins: Annotated[list[str], NoDecode] = Field(default_factory=list)
     max_image_bytes: int = 10 * 1024 * 1024
     min_image_width: int = 224

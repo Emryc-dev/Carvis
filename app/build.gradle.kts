@@ -27,8 +27,8 @@ android {
     applicationId = "com.aistudio.carvisionai.vktxqa"
     minSdk = 24
     targetSdk = 36
-    versionCode = 2
-    versionName = "1.1"
+    versionCode = 4
+    versionName = "1.3"
     buildConfigField("String", "API_BASE_URL", quoted(backendPublicEnv["API_BASE_URL"].orEmpty()))
     buildConfigField("String", "SUPABASE_URL", quoted(backendPublicEnv["SUPABASE_URL"].orEmpty()))
     buildConfigField("String", "SUPABASE_PUBLISHABLE_KEY", quoted(backendPublicEnv["SUPABASE_PUBLISHABLE_KEY"].orEmpty()))

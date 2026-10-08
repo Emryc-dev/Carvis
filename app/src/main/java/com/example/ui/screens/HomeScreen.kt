@@ -98,7 +98,6 @@ fun HomeScreen(
                     }
                 }
             }
-            scanState.error?.let { Text(it, color = androidx.compose.material3.MaterialTheme.colorScheme.error, fontSize = 13.sp) }
 
             Text("Dernière découverte", color = TextWhite, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
             if (latestVehicle == null) {

@@ -84,7 +84,8 @@ fun AuthScreen(
     onSignUp: (String, String, String) -> Unit,
     onGoogleSignIn: (String, String) -> Unit,
     onBack: () -> Unit,
-    onModeChange: () -> Unit
+    onModeChange: () -> Unit,
+    onError: (String) -> Unit,
 ) {
     var signUp by remember { mutableStateOf(false) }
     var name by remember { mutableStateOf("") }
@@ -92,7 +93,6 @@ fun AuthScreen(
     var password by remember { mutableStateOf("") }
     var passwordVisible by remember { mutableStateOf(false) }
     var validation by remember { mutableStateOf<String?>(null) }
-    var googleError by remember { mutableStateOf<String?>(null) }
     var googleBusy by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -111,12 +111,11 @@ fun AuthScreen(
 
     fun startGoogleSignIn() {
         if (googleWebClientId.isBlank() || !googleWebClientId.endsWith(".apps.googleusercontent.com")) {
-            googleError = "Google Auth n’est pas configuré. Ajoutez GOOGLE_WEB_CLIENT_ID dans carvision-backend/.env."
+            onError("Google Auth n’est pas configuré. Ajoutez GOOGLE_WEB_CLIENT_ID dans carvision-backend/.env.")
             return
         }
         scope.launch {
             googleBusy = true
-            googleError = null
             try {
                 val nonce = createGoogleNonce()
                 val option = GetSignInWithGoogleOption.Builder(googleWebClientId)
@@ -139,7 +138,7 @@ fun AuthScreen(
             } catch (_: GetCredentialCancellationException) {
                 // The user intentionally closed the account chooser.
             } catch (error: Exception) {
-                googleError = error.message ?: "Connexion Google impossible. Réessayez."
+                onError(error.message ?: "Connexion Google impossible. Réessayez.")
             } finally {
                 googleBusy = false
             }
@@ -152,6 +151,7 @@ fun AuthScreen(
             password.length < 6 -> "Le mot de passe doit contenir au moins 6 caractères."
             else -> null
         }
+        validation?.let(onError)
         if (validation == null) {
             focus.clearFocus()
             if (signUp) onSignUp(email.trim(), password, name.trim()) else onSignIn(email.trim(), password)
@@ -254,10 +254,6 @@ fun AuthScreen(
                 modifier = Modifier.fillMaxWidth()
             )
 
-            (googleError ?: validation ?: state.error)?.let {
-                Text(it, color = androidx.compose.material3.MaterialTheme.colorScheme.error, fontSize = 14.sp,
-                    modifier = Modifier.fillMaxWidth().padding(top = 10.dp))
-            }
             state.notice?.let {
                 Text(it, color = CyberCyan, fontSize = 14.sp, lineHeight = 20.sp,
                     modifier = Modifier.fillMaxWidth().padding(top = 10.dp))

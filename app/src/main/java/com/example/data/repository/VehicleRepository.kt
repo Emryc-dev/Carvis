@@ -29,6 +29,12 @@ class VehicleRepository(@Suppress("UNUSED_PARAMETER") database: CarVisionDatabas
         return snapshot.profile
     }
 
+    suspend fun restoreSession(): RemoteProfile? {
+        val snapshot = CarVisionApi.restoreSession() ?: return null
+        applySnapshot(snapshot)
+        return snapshot.profile
+    }
+
     suspend fun signInWithGoogle(idToken: String, nonce: String): RemoteProfile {
         val snapshot = CarVisionApi.signInWithGoogle(idToken, nonce)
         applySnapshot(snapshot)

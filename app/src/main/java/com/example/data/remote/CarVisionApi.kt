@@ -1,5 +1,6 @@
 package com.example.data.remote
 
+import android.content.Context
 import android.graphics.Bitmap
 import com.example.BuildConfig
 import com.example.data.model.ScanTelemetry
@@ -17,6 +18,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
+import java.time.Instant
 import java.util.concurrent.TimeUnit
 
 data class RemoteProfile(val name: String, val avatarUrl: String)
@@ -34,6 +36,21 @@ object CarVisionApi {
         .readTimeout(60, TimeUnit.SECONDS)
         .build()
     @Volatile private var accessToken: String? = null
+    @Volatile private var refreshToken: String? = null
+    @Volatile private var expiresAtMs: Long = 0L
+    @Volatile private var lastActiveAtMs: Long = 0L
+    private var sessionStore: SessionStore? = null
+
+    fun initialize(context: Context) {
+        if (sessionStore != null) return
+        sessionStore = SessionStore(context.applicationContext)
+        sessionStore?.load()?.let { session ->
+            accessToken = session.accessToken
+            refreshToken = session.refreshToken
+            expiresAtMs = session.expiresAtMs
+            lastActiveAtMs = session.lastActiveAtMs
+        }
+    }
 
     private val apiBase get() = BuildConfig.API_BASE_URL.trimEnd('/')
     private val supabaseUrl get() = BuildConfig.SUPABASE_URL.trimEnd('/')
@@ -45,6 +62,69 @@ object CarVisionApi {
             !supabaseUrl.contains("PROJECT_REF") &&
             publishableKey.isNotBlank() &&
             !publishableKey.contains("REPLACE_ME")
+
+    private fun saveSession(json: JSONObject) {
+        val now = System.currentTimeMillis()
+        accessToken = json.getString("access_token")
+        refreshToken = json.optString("refresh_token").ifBlank { refreshToken ?: "" }
+        expiresAtMs = now + json.optLong("expires_in", 3600L) * 1000L
+        lastActiveAtMs = now
+        val refresh = refreshToken.orEmpty()
+        if (refresh.isNotBlank()) sessionStore?.save(StoredSession(accessToken.orEmpty(), refresh, expiresAtMs, lastActiveAtMs))
+    }
+
+    private fun clearSession() {
+        accessToken = null
+        refreshToken = null
+        expiresAtMs = 0L
+        lastActiveAtMs = 0L
+        sessionStore?.clear()
+    }
+
+    private fun activeSessionAvailable(): Boolean {
+        val now = System.currentTimeMillis()
+        if (accessToken.isNullOrBlank() || refreshToken.isNullOrBlank()) return false
+        if (lastActiveAtMs <= 0L || now - lastActiveAtMs >= MAX_INACTIVITY_MS) {
+            clearSession()
+            return false
+        }
+        return true
+    }
+
+    private fun refreshSession() {
+        val refresh = refreshToken?.takeIf { it.isNotBlank() } ?: run {
+            clearSession(); error("Session expirée. Reconnectez-vous.")
+        }
+        val body = JSONObject().put("refresh_token", refresh).toString().toRequestBody("application/json".toMediaType())
+        val request = Request.Builder()
+            .url("$supabaseUrl/auth/v1/token?grant_type=refresh_token")
+            .header("apikey", publishableKey)
+            .post(body)
+            .build()
+        client.newCall(request).execute().use { response ->
+            val text = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                clearSession()
+                error("Session expirée. Reconnectez-vous.")
+            }
+            saveSession(JSONObject(text))
+        }
+    }
+
+    private fun authenticatedToken(): String {
+        if (!activeSessionAvailable()) error("Session expirée. Reconnectez-vous.")
+        val now = System.currentTimeMillis()
+        if (expiresAtMs <= now + REFRESH_MARGIN_MS) refreshSession()
+        lastActiveAtMs = now
+        sessionStore?.updateLastActive(now)
+        return accessToken ?: error("Session expirée. Reconnectez-vous.")
+    }
+
+    suspend fun restoreSession(): RemoteSnapshot? = withContext(Dispatchers.IO) {
+        if (!activeSessionAvailable()) return@withContext null
+        if (expiresAtMs <= System.currentTimeMillis() + REFRESH_MARGIN_MS) refreshSession()
+        snapshot()
+    }
 
     suspend fun signIn(email: String, password: String): RemoteSnapshot = withContext(Dispatchers.IO) {
         if (!configured()) error("Configuration mobile manquante. Renseignez API_BASE_URL, SUPABASE_URL et SUPABASE_PUBLISHABLE_KEY.")
@@ -58,7 +138,7 @@ object CarVisionApi {
         client.newCall(request).execute().use { response ->
             val text = response.body?.string().orEmpty()
             if (!response.isSuccessful) error(JSONObject(text).optString("msg", "Connexion refusée."))
-            accessToken = JSONObject(text).getString("access_token")
+            saveSession(JSONObject(text))
         }
         snapshot()
     }
@@ -82,7 +162,7 @@ object CarVisionApi {
             if (!response.isSuccessful) {
                 error(json.optString("msg").ifBlank { json.optString("error_description", "Connexion Google refusée.") })
             }
-            accessToken = json.getString("access_token")
+            saveSession(json)
         }
         snapshot()
     }
@@ -105,7 +185,7 @@ object CarVisionApi {
             if (!response.isSuccessful) error(json.optString("msg", "Impossible de créer le compte."))
             val token = json.optString("access_token")
             if (token.isBlank()) return@withContext null
-            accessToken = token
+            saveSession(json)
         }
         snapshot()
     }
@@ -149,9 +229,9 @@ object CarVisionApi {
         execute(Request.Builder().url("$apiBase/garage/$entryId").header("Authorization", bearer()).delete().build(), allowEmpty = true)
     }
 
-    fun signOut() { accessToken = null }
+    fun signOut() { clearSession() }
 
-    private fun bearer(): String = "Bearer " + (accessToken ?: error("Session expirée. Reconnectez-vous."))
+    private fun bearer(): String = "Bearer ${authenticatedToken()}"
 
     private fun getArray(path: String): JSONArray {
         val request = Request.Builder().url(apiBase + path).header("Authorization", bearer()).get().build()
@@ -228,7 +308,9 @@ object CarVisionApi {
         val vehicle = json.optJSONObject("vehicle")
         return ScanTelemetry(
             scanId = json.getString("id"),
-            timestamp = 0,
+            timestamp = runCatching {
+                Instant.parse(json.optString("created_at")).toEpochMilli()
+            }.getOrDefault(0L),
             vehicleName = vehicle?.let { it.optString("brand") + " " + it.optString("model") }?.trim().orEmpty(),
             confidence = json.optDouble("confidence"),
             latencyMs = 0,
@@ -274,6 +356,9 @@ object CarVisionApi {
         nextLevelXp = if (json.isNull("next_level_xp")) null else json.optInt("next_level_xp"),
         progressToNextLevel = json.optDouble("progress_to_next_level").toFloat()
     )
+
+    private const val MAX_INACTIVITY_MS = 7L * 24 * 60 * 60 * 1000
+    private const val REFRESH_MARGIN_MS = 60L * 1000
 }
 
 

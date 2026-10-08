@@ -93,14 +93,17 @@ fun VehicleDiscoveryCard(
     isAdding: Boolean,
     feedback: String?,
     onAdd: () -> Unit,
-    onNotNow: () -> Unit
+    onNotNow: () -> Unit,
+    imageModel: Any? = vehicle.imageUrl,
+    capturedAt: String? = null,
+    secondaryLabel: String = "PAS MAINTENANT",
 ) {
     val accent = rarityColor(vehicle.rarity)
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         Surface(color = SurfaceContainerLow, shape = RoundedCornerShape(20.dp)) {
             Column {
                 AsyncImage(
-                    model = vehicle.imageUrl,
+                    model = imageModel,
                     contentDescription = "${vehicle.brand} ${vehicle.model}",
                     modifier = Modifier.fillMaxWidth().height(230.dp).background(accent.copy(alpha = .08f)),
                     contentScale = ContentScale.Crop
@@ -110,20 +113,26 @@ fun VehicleDiscoveryCard(
                         RarityLabel(vehicle.rarity)
                         Text("+${vehicle.collectionXp} XP", color = accent, fontWeight = FontWeight.Bold)
                     }
-                    Text("${vehicle.brand} ${vehicle.model}", color = TextWhite, fontSize = 27.sp, fontWeight = FontWeight.Bold)
-                    val subtitle = listOfNotNull(vehicle.year.takeIf { it > 0 }?.toString(), vehicle.generation.takeIf { it.isNotBlank() }).joinToString(" · ")
+                    Text(vehicle.brand.uppercase(), color = TextMuted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    Text(vehicle.model, color = TextWhite, fontSize = 27.sp, fontWeight = FontWeight.Bold)
+                    val subtitle = listOfNotNull(vehicle.year.takeIf { it > 0 }?.toString(), vehicle.generation.takeIf { it.isNotBlank() }).joinToString(" / ")
                     if (subtitle.isNotBlank()) Text(subtitle, color = TextMuted)
+                    capturedAt?.takeIf { it.isNotBlank() }?.let { Text("CAPTURED ${it.take(10)}", color = TextMuted, fontSize = 11.sp) }
                 }
             }
         }
-        if (feedback != null) Text(feedback, color = if (feedback.startsWith("+")) accent else TextMuted, fontWeight = FontWeight.SemiBold)
+        if (feedback != null) Text(
+            feedback,
+            color = if (feedback.contains("ADDED TO GARAGE")) CyberCyan else TextMuted,
+            fontWeight = FontWeight.SemiBold,
+        )
         Button(
             onClick = onAdd,
             enabled = !isAdding && !vehicle.isSavedInGarage,
             modifier = Modifier.fillMaxWidth().height(54.dp),
             shape = RoundedCornerShape(14.dp),
             colors = ButtonDefaults.buttonColors(containerColor = CyberCyan, contentColor = CyanDark)
-        ) { Text(if (vehicle.isSavedInGarage) "DÉJÀ DANS LE GARAGE" else if (isAdding) "AJOUT…" else "AJOUTER AU GARAGE", fontWeight = FontWeight.Bold) }
-        OutlinedButton(onClick = onNotNow, modifier = Modifier.fillMaxWidth().height(50.dp), shape = RoundedCornerShape(14.dp)) { Text("PAS MAINTENANT") }
+        ) { Text(if (vehicle.isSavedInGarage) "DÉJÀ DANS LE GARAGE" else if (isAdding) "AJOUT..." else "AJOUTER AU GARAGE", fontWeight = FontWeight.Bold) }
+        OutlinedButton(onClick = onNotNow, modifier = Modifier.fillMaxWidth().height(50.dp), shape = RoundedCornerShape(14.dp)) { Text(secondaryLabel) }
     }
 }
