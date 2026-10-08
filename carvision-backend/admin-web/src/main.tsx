@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react"
 import { createRoot } from "react-dom/client"
 import { createClient, type Session } from "@supabase/supabase-js"
+import { Dialog as DialogPrimitive } from "@base-ui/react/dialog"
 import {
   Activity, Car, CheckCircle2, CircleAlert, Database, FileSearch, Gauge,
   Eye, EyeOff, HelpCircle, LayoutDashboard, LogOut, Menu, Moon, RefreshCw, Search,
-  Server, Sun, Users,
+  Server, Sun, Users, Archive, Bot, CalendarDays, Heart, Mail, Phone, ShieldCheck, X,
 } from "lucide-react"
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip as ChartTooltip, XAxis, YAxis } from "recharts"
 import { Badge } from "@/components/ui/badge"
@@ -14,7 +15,6 @@ import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import {
   Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupLabel,
   SidebarHeader, SidebarInset, SidebarMenu, SidebarMenuButton, SidebarMenuItem,
@@ -220,7 +220,7 @@ function AdminApp({ session }: { session: Session }) {
           <div className={page === "system" ? "hidden" : "relative md:hidden"}><Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"/><Input className="pl-9" aria-label="Search dashboard records" placeholder="Search..." value={query} onChange={event => setQuery(event.target.value)}/></div>
           {error ? <ErrorState error={error} retry={load}/> : loading ? <LoadingState/> : page === "overview" ? <OverviewView data={overview} scans={filteredRecent} select={setSelected}/> : page === "system" ? <SystemView state={system}/> : <ListView page={page} rows={rows} total={total} offset={offset} limit={limit} select={selectRecord} previous={() => setOffset(value => Math.max(0, value - limit))} next={() => setOffset(value => value + limit)}/>} 
           {selected && <SelectedRecord value={selected} close={() => setSelected(null)}/>} 
-          <UserDetailSheet open={userDetailOpen} onOpenChange={setUserDetailOpen} detail={userDetail} loading={userDetailLoading} error={userDetailError}/>
+          <UserDetailDialog open={userDetailOpen} onOpenChange={setUserDetailOpen} detail={userDetail} loading={userDetailLoading} error={userDetailError}/>
         </main>
       </SidebarInset>
     </SidebarProvider>
@@ -262,7 +262,8 @@ function StatusBadge({ value }: { value: string }) { const variant = value === "
 function EmptyState({ text }: { text: string }) { return <div className="flex min-h-40 items-center justify-center rounded-xl border border-dashed p-8 text-center text-sm text-muted-foreground">{text}</div> }
 function SelectedRecord({ value, close }: { value: Scan | User | Vehicle; close: () => void }) { return <Card className="border-primary/30"><CardHeader className="flex-row items-start justify-between"><div><CardTitle>Record details</CardTitle><CardDescription>Values returned by the admin API.</CardDescription></div><Button variant="ghost" onClick={close}>Close</Button></CardHeader><CardContent><pre className="max-h-80 overflow-auto rounded-lg bg-muted p-4 text-xs">{JSON.stringify(value, null, 2)}</pre></CardContent></Card> }
 
-function UserDetailSheet({ open, onOpenChange, detail, loading, error }: { open: boolean; onOpenChange: (open: boolean) => void; detail: UserDetail | null; loading: boolean; error: string }) {
+function UserDetailDialog({ open, onOpenChange, detail, loading, error }: { open: boolean; onOpenChange: (open: boolean) => void; detail: UserDetail | null; loading: boolean; error: string }) {
+  const [tab, setTab] = useState<"overview" | "activity" | "collection">("overview")
   const activities = useMemo(() => {
     if (!detail) return []
     const events: Array<{ id: string; date: string; title: string; description: string }> = [
@@ -276,42 +277,70 @@ function UserDetailSheet({ open, onOpenChange, detail, loading, error }: { open:
     return events.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
   }, [detail])
 
-  return <Sheet open={open} onOpenChange={onOpenChange}>
-    <SheetContent className="w-full overflow-y-auto sm:max-w-2xl">
-      <SheetHeader className="border-b pr-14">
-        <SheetTitle>{detail?.profile.name || detail?.email || "User details"}</SheetTitle>
-        <SheetDescription>{detail?.email || "Loading the complete account and activity history."}</SheetDescription>
-      </SheetHeader>
-      <div className="space-y-6 px-4 pb-8">
-        {loading ? <div className="space-y-3"><Skeleton className="h-24 w-full"/><Skeleton className="h-56 w-full"/></div> : error ? <div role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">{error}</div> : detail ? <>
-          <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            {Object.entries(detail.summary).map(([label, value]) => <div key={label} className="rounded-lg border p-3"><p className="text-xs capitalize text-muted-foreground">{label.replace("_", " ")}</p><p className="mt-1 font-mono text-2xl font-semibold">{value}</p></div>)}
-          </section>
-          <section className="space-y-3">
-            <h3 className="font-semibold">Account</h3>
-            <dl className="grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
-              <div><dt className="text-muted-foreground">Email</dt><dd className="break-all font-medium">{detail.email || "Not available"}</dd></div>
-              <div><dt className="text-muted-foreground">Phone</dt><dd>{detail.phone || "Not available"}</dd></div>
-              <div><dt className="text-muted-foreground">Providers</dt><dd>{detail.providers.join(", ") || "email"}</dd></div>
-              <div><dt className="text-muted-foreground">Confirmed</dt><dd>{detail.confirmed_at ? new Date(detail.confirmed_at).toLocaleString() : "Not confirmed"}</dd></div>
-              <div><dt className="text-muted-foreground">Created</dt><dd>{new Date(detail.created_at).toLocaleString()}</dd></div>
-              <div><dt className="text-muted-foreground">Last sign-in</dt><dd>{detail.last_sign_in_at ? new Date(detail.last_sign_in_at).toLocaleString() : "Never"}</dd></div>
-              <div className="sm:col-span-2"><dt className="text-muted-foreground">Auth user ID</dt><dd className="break-all font-mono text-xs">{detail.auth_user_id}</dd></div>
-            </dl>
-          </section>
-          <section className="space-y-3">
-            <div><h3 className="font-semibold">Activity</h3><p className="text-sm text-muted-foreground">Authentication, scans, AI processing, favorites and garage activity recorded by CarVision.</p></div>
-            {activities.length ? <div className="divide-y rounded-lg border">{activities.map(activity => <div key={activity.id} className="grid gap-1 p-3 sm:grid-cols-[10rem_1fr]"><time className="text-xs text-muted-foreground">{new Date(activity.date).toLocaleString()}</time><div><p className="font-medium">{activity.title}</p><p className="text-sm text-muted-foreground">{activity.description}</p></div></div>)}</div> : <EmptyState text="No recorded activity for this user."/>}
-          </section>
-          <section className="space-y-3">
-            <h3 className="font-semibold">Stored metadata</h3>
-            <pre className="max-h-64 overflow-auto rounded-lg bg-muted p-4 text-xs">{JSON.stringify({ user_metadata: detail.user_metadata, app_metadata: detail.app_metadata, profile_settings: detail.profile.settings }, null, 2)}</pre>
-          </section>
+  useEffect(() => { if (open) setTab("overview") }, [open, detail?.auth_user_id])
+
+  return <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
+    <DialogPrimitive.Portal>
+      <DialogPrimitive.Backdrop className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm"/>
+      <DialogPrimitive.Popup className="fixed inset-x-3 top-1/2 z-50 max-h-[88vh] w-auto -translate-y-1/2 overflow-hidden rounded-2xl border bg-background shadow-2xl outline-none sm:left-1/2 sm:right-auto sm:w-[min(960px,calc(100vw-3rem))] sm:-translate-x-1/2">
+        <div className="flex items-start justify-between border-b bg-muted/30 px-5 py-4 sm:px-6">
+          <div className="min-w-0">
+            <DialogPrimitive.Title className="truncate text-lg font-semibold">{detail?.profile.name || detail?.email || "User details"}</DialogPrimitive.Title>
+            <DialogPrimitive.Description className="mt-1 truncate text-sm text-muted-foreground">{detail?.email || "Complete application profile and activity"}</DialogPrimitive.Description>
+          </div>
+          <DialogPrimitive.Close render={<Button variant="ghost" size="icon" aria-label="Close user details"/>}><X/></DialogPrimitive.Close>
+        </div>
+        {loading ? <div className="space-y-4 p-6"><Skeleton className="h-28 w-full"/><Skeleton className="h-72 w-full"/></div> : error ? <div role="alert" className="m-6 rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">{error}</div> : detail ? <>
+          <div className="flex gap-1 overflow-x-auto border-b px-5 pt-3 sm:px-6" role="tablist" aria-label="User details sections">
+            <DetailTab active={tab === "overview"} onClick={() => setTab("overview")}>Overview</DetailTab>
+            <DetailTab active={tab === "activity"} onClick={() => setTab("activity")}>Activity <span className="ml-1 text-xs text-muted-foreground">{activities.length}</span></DetailTab>
+            <DetailTab active={tab === "collection"} onClick={() => setTab("collection")}>Collection</DetailTab>
+          </div>
+          <div className="max-h-[calc(88vh-145px)] overflow-y-auto p-5 sm:p-6">
+            {tab === "overview" && <UserOverview detail={detail}/>} 
+            {tab === "activity" && <UserActivity activities={activities}/>} 
+            {tab === "collection" && <UserCollection detail={detail}/>} 
+          </div>
         </> : null}
-      </div>
-    </SheetContent>
-  </Sheet>
+      </DialogPrimitive.Popup>
+    </DialogPrimitive.Portal>
+  </DialogPrimitive.Root>
 }
+
+function DetailTab({ active, children, onClick }: { active: boolean; children: React.ReactNode; onClick: () => void }) {
+  return <button type="button" role="tab" aria-selected={active} onClick={onClick} className={`shrink-0 border-b-2 px-3 pb-3 text-sm font-medium transition-colors ${active ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}>{children}</button>
+}
+
+function UserOverview({ detail }: { detail: UserDetail }) {
+  const initials = (detail.profile.name || detail.email || "U").split(/\s|@/).filter(Boolean).slice(0, 2).map(value => value[0]).join("").toUpperCase()
+  return <div className="space-y-6">
+    <section className="flex flex-col gap-4 rounded-xl border bg-muted/20 p-4 sm:flex-row sm:items-center sm:p-5">
+      {detail.profile.avatar_url ? <img src={detail.profile.avatar_url} alt="" className="size-14 rounded-full object-cover"/> : <div className="flex size-14 items-center justify-center rounded-full bg-primary font-semibold text-primary-foreground">{initials}</div>}
+      <div className="min-w-0 flex-1"><p className="text-lg font-semibold">{detail.profile.name || "Unnamed user"}</p><p className="truncate text-sm text-muted-foreground">{detail.email || "No email address"}</p><div className="mt-2 flex flex-wrap gap-2">{detail.providers.length ? detail.providers.map(provider => <Badge key={provider} variant="secondary">{provider}</Badge>) : <Badge variant="secondary">email</Badge>}{detail.confirmed_at ? <Badge>Verified account</Badge> : <Badge variant="outline">Unverified account</Badge>}</div></div>
+    </section>
+    <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <DetailMetric icon={FileSearch} label="Scans" value={detail.summary.scans}/><DetailMetric icon={Archive} label="Garage" value={detail.summary.garage_entries}/><DetailMetric icon={Heart} label="Favorites" value={detail.summary.favorites}/><DetailMetric icon={Bot} label="AI requests" value={detail.summary.ai_requests}/>
+    </section>
+    <section className="grid gap-4 lg:grid-cols-2">
+      <div className="rounded-xl border p-4"><h3 className="mb-4 font-semibold">Account</h3><dl className="grid gap-4 text-sm"><Definition icon={Mail} label="Email" value={detail.email || "Not available"}/><Definition icon={Phone} label="Phone" value={detail.phone || "Not available"}/><Definition icon={ShieldCheck} label="Authentication" value={detail.providers.join(", ") || "email"}/></dl></div>
+      <div className="rounded-xl border p-4"><h3 className="mb-4 font-semibold">Access</h3><dl className="grid gap-4 text-sm"><Definition icon={CalendarDays} label="Created" value={formatDate(detail.created_at)}/><Definition icon={CalendarDays} label="Last sign-in" value={detail.last_sign_in_at ? formatDate(detail.last_sign_in_at) : "Never"}/><Definition icon={ShieldCheck} label="Email status" value={detail.confirmed_at ? `Verified ${formatDate(detail.confirmed_at)}` : "Not confirmed"}/></dl></div>
+    </section>
+    <section className="rounded-xl border p-4"><h3 className="mb-3 font-semibold">Profile settings</h3><MetadataList data={detail.profile.settings}/></section>
+  </div>
+}
+
+function UserActivity({ activities }: { activities: Array<{ id: string; date: string; title: string; description: string }> }) {
+  return <section><div className="mb-4"><h3 className="font-semibold">Complete activity history</h3><p className="mt-1 text-sm text-muted-foreground">Authentication, scans, recognition processing, favorites and Garage events.</p></div>{activities.length ? <div className="divide-y rounded-xl border">{activities.map(activity => <div key={activity.id} className="grid gap-2 p-4 sm:grid-cols-[10rem_1fr]"><time className="text-xs text-muted-foreground">{formatDate(activity.date)}</time><div><p className="font-medium">{activity.title}</p><p className="mt-1 text-sm text-muted-foreground">{activity.description}</p></div></div>)}</div> : <EmptyState text="No recorded activity for this user."/>}</section>
+}
+
+function UserCollection({ detail }: { detail: UserDetail }) {
+  return <div className="grid gap-6 lg:grid-cols-2"><section><h3 className="mb-3 font-semibold">Garage, {detail.garage.length}</h3>{detail.garage.length ? <div className="divide-y rounded-xl border">{detail.garage.map(item => <div key={item.id} className="flex items-center justify-between gap-3 p-3"><div><p className="font-medium">{item.vehicle.brand} {item.vehicle.model}</p><p className="text-xs text-muted-foreground">{formatDate(item.captured_at)}</p></div><div className="text-right"><p className="font-mono font-semibold">+{item.xp_earned} XP</p><p className="text-xs text-muted-foreground">{item.removed_at ? "Removed" : "Collected"}</p></div></div>)}</div> : <EmptyState text="No Garage vehicles yet."/>}</section><section><h3 className="mb-3 font-semibold">Favorites, {detail.favorites.length}</h3>{detail.favorites.length ? <div className="divide-y rounded-xl border">{detail.favorites.map(item => <div key={item.id} className="flex items-center justify-between gap-3 p-3"><div><p className="font-medium">{item.vehicle.brand} {item.vehicle.model}</p><p className="text-xs text-muted-foreground">{item.vehicle.year || "Year not recorded"}</p></div><time className="text-xs text-muted-foreground">{formatDate(item.created_at)}</time></div>)}</div> : <EmptyState text="No favorite vehicles yet."/>}</section></div>
+}
+
+function DetailMetric({ icon: Icon, label, value }: { icon: React.ElementType; label: string; value: number }) { return <div className="rounded-xl border bg-background p-4"><Icon className="size-4 text-muted-foreground"/><p className="mt-4 text-2xl font-semibold tabular-nums">{value.toLocaleString()}</p><p className="mt-1 text-sm text-muted-foreground">{label}</p></div> }
+function Definition({ icon: Icon, label, value }: { icon: React.ElementType; label: string; value: string }) { return <div className="flex gap-3"><Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground"/><div className="min-w-0"><dt className="text-xs text-muted-foreground">{label}</dt><dd className="mt-0.5 break-words font-medium">{value}</dd></div></div> }
+function MetadataList({ data }: { data: Record<string, unknown> }) { const entries = Object.entries(data).filter(([, value]) => value !== null && value !== undefined && String(value).trim() !== ""); return entries.length ? <dl className="grid gap-3 text-sm sm:grid-cols-2">{entries.map(([key, value]) => <div key={key}><dt className="text-xs capitalize text-muted-foreground">{key.replaceAll("_", " ")}</dt><dd className="mt-0.5 break-words font-medium">{typeof value === "object" ? "Configured" : String(value)}</dd></div>)}</dl> : <p className="text-sm text-muted-foreground">No profile settings recorded.</p> }
+function formatDate(value: string) { const date = new Date(value); return Number.isNaN(date.getTime()) ? "Not available" : date.toLocaleString() }
 
 function SystemView({ state }: { state: SystemState }) { const ready = (state.ready as { status?: string })?.status === "ready"; return <div className="grid gap-4 md:grid-cols-2"><Card><CardHeader><CardTitle className="flex items-center gap-2">{state.health ? <CheckCircle2 className="text-emerald-500"/> : <CircleAlert/>}API health</CardTitle><CardDescription>Response from the public health endpoint.</CardDescription></CardHeader><CardContent><pre className="overflow-auto rounded-lg bg-muted p-4 text-xs">{JSON.stringify(state.health, null, 2)}</pre></CardContent></Card><Card><CardHeader><CardTitle className="flex items-center gap-2">{ready ? <CheckCircle2 className="text-emerald-500"/> : <CircleAlert className="text-amber-500"/>}Dependencies</CardTitle><CardDescription>Backend configuration readiness.</CardDescription></CardHeader><CardContent><pre className="overflow-auto rounded-lg bg-muted p-4 text-xs">{JSON.stringify(state.ready, null, 2)}</pre></CardContent></Card></div> }
 
