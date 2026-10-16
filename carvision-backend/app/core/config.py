@@ -29,12 +29,32 @@ class Settings(BaseSettings):
     min_image_height: int = 224
     max_image_dimension: int = 12_000
     ai_timeout_seconds: float = 45
+    catalogue_enrichment_min_confidence: float = Field(0.65, ge=0, le=1)
+    recognition_engine: Literal["gemini", "ml", "hybrid"] = "gemini"
+    ml_shadow_mode: bool = False
+    ml_model_path: str = "ml/artifacts/vehicle_classifier_v1.pt"
+    ml_model_metadata_path: str = "ml/artifacts/vehicle_classifier_v1.json"
+    ml_model_version: str = "vehicle_classifier_v1"
+    ml_device: str = "cpu"
+    ml_top_k: int = Field(5, ge=1, le=20)
+    ml_min_confidence: float = Field(0.70, ge=0, le=1)
+    ml_gemini_validation_threshold: float = Field(0.82, ge=0, le=1)
+    ml_detector_min_confidence: float = Field(0.55, ge=0, le=1)
+    ml_enable_pretrained_detector: bool = True
 
     @field_validator("cors_origins", mode="before")
     @classmethod
     def split_origins(cls, value: object) -> object:
         if isinstance(value, str):
             return [item.strip() for item in value.split(",") if item.strip()]
+        return value
+
+    @field_validator("debug", mode="before")
+    @classmethod
+    def normalise_debug(cls, value: object) -> object:
+        """Accept the legacy deployment value DEBUG=release as false."""
+        if isinstance(value, str) and value.strip().lower() in {"release", "production"}:
+            return False
         return value
 
     @field_validator("database_url", "direct_url")
