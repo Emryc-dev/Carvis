@@ -1,6 +1,7 @@
 import base64
 import asyncio
 import json
+import logging
 
 import httpx
 
@@ -8,6 +9,8 @@ from app.core.config import Settings
 from app.core.errors import AppError
 from app.schemas.ai import AIIdentification
 from app.services.ai.base import AIService
+
+logger = logging.getLogger(__name__)
 
 
 class GeminiService(AIService):
@@ -20,7 +23,9 @@ class GeminiService(AIService):
             raise AppError(503, "ai_not_configured", "Vehicle recognition is not configured")
         schema = AIIdentification.model_json_schema()
         prompt = (
-            "Identify only what is supportable from the vehicle image. Return JSON matching the supplied schema. "
+            "You are an automotive visual-identification specialist. Identify the most supportable make and model from the vehicle image, "
+            "even when the exact trim or model year is uncertain. For a recognisable special or track variant, return the base model plus the variant "
+            "in the model field only when the visual evidence supports it. Return JSON matching the supplied schema. "
             "Use null for unsupported specifications, list visual evidence and uncertainties, and never invent VIN, packages, prices, or verification. "
             f"Optional user context: {context or 'none'}"
         )
@@ -36,6 +41,16 @@ class GeminiService(AIService):
                 for attempt in range(2):
                     try:
                         response = await client.post(url, params={"key": self.settings.gemini_api_key}, json=body)
+                        if response.is_error:
+                            # Railway must expose provider diagnostics without ever logging
+                            # the API key, request URL/query string, or uploaded image.
+                            detail = response.text.replace("\n", " ").strip()[:500]
+                            logger.warning(
+                                "gemini_request_failed model=%s status=%s detail=%s",
+                                model,
+                                response.status_code,
+                                detail,
+                            )
                         if response.status_code in {429, 500, 502, 503, 504}:
                             last_transient_error = httpx.HTTPStatusError(
                                 f"Gemini {model} temporarily unavailable",
