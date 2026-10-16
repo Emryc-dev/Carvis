@@ -12,14 +12,12 @@ from app.schemas.ai import AIIdentification
 from app.services.ai.base import AIService
 from app.services.image_service import ValidImage
 from app.services.redis_service import RedisService
-from app.services.recognition.service import RecognitionResult, VehicleRecognitionService
 from app.services.storage_service import StorageService
 
 
 class ScanService:
     def __init__(self, settings: Settings, ai: AIService, cache: RedisService, storage: StorageService):
         self.settings, self.ai, self.cache, self.storage = settings, ai, cache, storage
-        self.recognition = VehicleRecognitionService(settings, ai)
 
     async def create(self, db: AsyncSession, user: UserProfile, image: ValidImage, context: str | None) -> VehicleScan:
         scan_id = uuid.uuid4()
@@ -57,34 +55,15 @@ class ScanService:
             raise
 
     async def _identify(self, db: AsyncSession, image: ValidImage, context: str | None, scan_id: str) -> tuple[AIIdentification | None, dict | None]:
-        """Choose the configured engine without making an untrained ML model primary."""
-        if self.settings.recognition_engine == "gemini":
-            result = await self._gemini_cached(image, context)
-            if self.settings.ml_shadow_mode:
-                # Shadow failures are recorded but never alter the user-facing Gemini result.
-                shadow = await self.recognition.recognize(db, image.content, image.mime_type, context, scan_id)
-                return result, {"engine": "gemini", "shadow_ml": shadow.metadata}
-            return result, {"engine": "gemini"}
-
-        ml = await self.recognition.recognize(db, image.content, image.mime_type, context, scan_id)
-        metadata = {"engine": self.settings.recognition_engine, **ml.metadata}
-        if self.settings.recognition_engine == "ml":
-            return ml.identification, metadata
-
-        # Hybrid calls Gemini only when the model result is absent/ambiguous;
-        # it must not overwrite a strong catalogue-backed ML identification.
-        if ml.status.value == "identified" and (ml.final_confidence or 0) >= self.settings.ml_gemini_validation_threshold:
-            return ml.identification, metadata
-        gemini_started = time.perf_counter()
-        try:
-            fallback = await self._gemini_cached(image, context)
-            metadata["gemini_validation"] = {"used": True, "status": "completed", "latency_ms": int((time.perf_counter() - gemini_started) * 1000)}
-            return fallback, metadata
-        except AppError as exc:
-            # A secondary validation failure cannot turn a valid ML result into
-            # an API failure.  An uncertain ML result remains uncertain.
-            metadata["gemini_validation"] = {"used": True, "status": "failed", "error_code": exc.code, "latency_ms": int((time.perf_counter() - gemini_started) * 1000)}
-            return ml.identification, metadata
+        """Use Gemini until the separately developed ML package is deployed."""
+        if self.settings.recognition_engine != "gemini":
+            raise AppError(
+                503,
+                "recognition_engine_not_deployed",
+                "This deployment supports Gemini recognition only.",
+            )
+        result = await self._gemini_cached(image, context)
+        return result, {"engine": "gemini"}
 
     async def _gemini_cached(self, image: ValidImage, context: str | None) -> AIIdentification:
         cache_key = f"ai_result:v1:{image.sha256}"
